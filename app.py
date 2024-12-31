@@ -25,6 +25,14 @@ app.config['DOWNLOAD_DIR'] = os.environ.get('DOWNLOAD_DIR', 'downloads')
 # In-memory download tracking
 downloads_status = {}
 
+def verify_password(password, hashed):
+    """Verify a password against a hash."""
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    except Exception as e:
+        logger.error(f"Error verifying password: {e}")
+        return False
+
 def load_users():
     """Load users from JSON file."""
     try:
@@ -33,7 +41,17 @@ def load_users():
             return {u["username"]: u["password_hash"] for u in data["users"]}
     except Exception as e:
         logger.error(f"Error loading users: {e}")
-        return {}
+        # If no users file exists, create default admin user
+        hashed = bcrypt.hashpw("admin".encode('utf-8'), bcrypt.gensalt(12))
+        users_data = {
+            "users": [{
+                "username": "admin",
+                "password_hash": hashed.decode('utf-8')
+            }]
+        }
+        with open("users.json", "w") as f:
+            json.dump(users_data, f, indent=4)
+        return {"admin": hashed.decode('utf-8')}
 
 USERS = load_users()
 
@@ -54,10 +72,10 @@ def login():
     """Handle user login."""
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password'].encode('utf-8')
-        hashed = USERS.get(username)
+        password = request.form['password']
+        stored_hash = USERS.get(username)
 
-        if hashed and bcrypt.checkpw(password, hashed.encode('utf-8')):
+        if stored_hash and verify_password(password, stored_hash):
             session['logged_in'] = True
             session['username'] = username
             logger.info(f"Successful login for user: {username}")

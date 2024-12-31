@@ -23,13 +23,22 @@ A web-based application that enables authenticated users to download audio from 
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd flac-downloader
+   cd yt-dl
    ```
 
 2. Build and run with Docker:
    ```bash
-   docker build -t flac-downloader .
-   docker run -p 5000:5000 -v $(pwd)/downloads:/app/downloads flac-downloader
+   # Pull from GitHub Container Registry
+   docker pull ghcr.io/<your-github-username>/yt-dl:latest
+   
+   # Run the container
+   docker run -p 5000:5000 -v $(pwd)/downloads:/app/downloads ghcr.io/<your-github-username>/yt-dl:latest
+   ```
+
+   Or build locally:
+   ```bash
+   docker build -t yt-dl .
+   docker run -p 5000:5000 -v $(pwd)/downloads:/app/downloads yt-dl
    ```
 
 3. Access the application at `http://localhost:5000`
@@ -79,7 +88,13 @@ A web-based application that enables authenticated users to download audio from 
 
 ## Adding Users
 
-To add new users, modify the `users.json` file. Passwords should be hashed using bcrypt. You can use the Python REPL to generate password hashes:
+To add new users, modify the `users.json` file. Passwords should be hashed using bcrypt. You can use the provided script:
+
+```bash
+python3 generate_hash.py
+```
+
+Or use Python REPL to generate password hashes:
 
 ```python
 import bcrypt
