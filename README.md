@@ -1,4 +1,4 @@
-# FLAC Downloader
+# yt-dlp FLAC Downloader
 
 A web-based application that enables authenticated users to download audio from YouTube videos in FLAC format. Built with Flask and modern UI components, featuring user-specific storage and download tracking.
 
