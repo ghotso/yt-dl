@@ -1,0 +1,386 @@
+PRODUCT REQUIREMENTS DOCUMENT (PRD)
+==================================
+
+Project Name: FLAC Downloader with User Login, Tracking, User-Specific Folders, Modern UI, Logging, and GitHub Actions Deployment
+
+---
+
+TABLE OF CONTENTS
+-----------------
+1. Overview
+2. Goals and Objectives
+3. Detailed Feature Descriptions
+    3.1 User Authentication
+    3.2 FLAC Download
+    3.3 Per-User Download Tracking
+    3.4 User-Specific Folders
+    3.5 Modern Responsive UI
+    3.6 Error Checks, Logging, and Comments
+    3.7 Single-Container Deployment
+    3.8 GitHub Actions (CI/CD)
+4. Architecture and Workflow
+5. Edge Cases and Potential Errors
+6. Step-by-Step Implementation Phases
+7. Sample Code Snippets
+8. Conclusion
+
+---
+
+1. OVERVIEW
+-----------
+The **FLAC Downloader** is a web-based application that enables authenticated users to:
+- Enter a YouTube (or other supported) URL
+- Download the audio track as a FLAC file
+- Access a tracking dashboard showing “in progress” and “completed” downloads
+- Keep their downloads in a **user-specific folder**, so each user’s files remain organized
+
+The application will offer:
+- **Session-based user login** (with optional “Remember me” functionality)
+- **Mobile-friendly UI** (particularly iPhone-ready)
+- **Detailed logging** and **error checks** to handle process failures
+- **Single Docker container** deployment (no external database)
+- **Automated build & publish** via **GitHub Actions**
+
+All these components must work together seamlessly, accounting for **edge cases** such as invalid links, missing dependencies, or network issues.
+
+---
+
+2. GOALS AND OBJECTIVES
+-----------------------
+1. **Primary Goal**: Provide a **secure, user-friendly, and organized** platform for converting YouTube audio to FLAC.
+2. **User’s Ultimate Objective**: Users want a simple way to paste a link, see the progress, and retrieve their FLAC files without interfering with other users’ data.
+3. **Developer’s Perspective**:
+   - Implement stable authentication without a separate database.
+   - Keep track of active downloads and their statuses.
+   - Organize each user’s downloads in separate directories.
+   - Offer a polished UI (including error handling and logs).
+   - Deploy automatically via GitHub Actions for consistent builds and versioning.
+
+---
+
+3. DETAILED FEATURE DESCRIPTIONS
+--------------------------------
+
+### 3.1 User Authentication
+1. **Login**  
+   - Users supply **username** and **password** on a login page.
+   - “Remember me” option toggles a longer session expiry.
+   - Passwords are **hashed** (e.g., bcrypt) and stored in a local JSON file (`users.json`).
+2. **Logout**  
+   - Terminate the session and clear user data in the Flask session context.
+3. **Error Cases**  
+   - Invalid credentials → show an error message.
+   - Password mismatch → re-prompt login.
+4. **Logging**  
+   - Log successful and failed login attempts with timestamps.
+
+### 3.2 FLAC Download
+1. **Download Invocation**  
+   - Users, once authenticated, submit a URL (commonly a YouTube link).
+   - The system uses **yt-dlp** to fetch audio and **ffmpeg** to convert it to FLAC.
+2. **File Naming**  
+   - Files are named based on video title and ID (e.g., `Cool Song [abcd1234].flac`).
+   - Non-alphanumeric characters in the title are sanitized (underscores or removed).
+3. **Error Checks**  
+   - If `yt-dlp` or `ffmpeg` fail, log the stderr output and report an error back to the user.
+4. **Logging**  
+   - Log the download start time, link, and completion (or failure) time.
+
+### 3.3 Per-User Download Tracking
+1. **In-Memory Tracking**  
+   - Maintain a Python dictionary, keyed by username, listing active downloads (with statuses like `in_progress`, `completed`, or `failed`).
+   - Example:
+     ```python
+     downloads_status = {
+       "admin": [
+         { "id": "job123", "title": "My Song", "status": "in_progress" },
+         ...
+       ],
+       "bob": [...]
+     }
+     ```
+2. **UI Tracking**  
+   - A dedicated page or section (`/status` or integrated into `/`) shows the currently logged-in user’s downloads.
+   - Status updates from “In Progress” to “Completed” when done.
+3. **Edge Case**  
+   - If the server restarts, in-memory tracking is lost (unless you implement persistence).
+4. **Logging**  
+   - Each new job is logged (“Started download: user=..., link=...”).
+   - Completion logs (“Completed download: user=..., link=..., status=OK”).
+
+### 3.4 User-Specific Folders
+1. **Directory Structure**  
+   - On successful login, the system knows the username, e.g., “admin”.
+   - Downloads go into `downloads/admin/` (or `downloads/bob/`) on the container’s filesystem.
+2. **Creation**  
+   - If `downloads/<username>` does not exist, create it at download initiation.
+3. **Mounting**  
+   - In Docker, the `downloads` directory is typically mapped to a host folder (`-v /host/downloads:/app/downloads`) so files are accessible on the host.
+4. **Error Handling**  
+   - Check file/directory permissions. If creation fails, log an error and notify the user.
+
+### 3.5 Modern Responsive UI
+1. **Responsive Layout**  
+   - Leverage a CSS framework (e.g., **Bootstrap**) for a grid system and responsive components.
+   - Include `<meta name="viewport" content="width=device-width, initial-scale=1.0">` for mobile scaling.
+2. **Mobile-Focused Design**  
+   - Ensure forms, buttons, and texts are easily clickable on iPhone screens.
+   - The status list (downloads) should be scrollable if it’s long.
+3. **Error Feedback**  
+   - Display inline error messages, success alerts, or progress indicators.
+4. **Logging**  
+   - Not directly applicable to the UI, but store timestamps for user actions (clicks, downloads triggered, etc.) in the backend logs if needed.
+
+### 3.6 Error Checks, Logging, and Comments
+1. **Error Checks**  
+   - Validate user input (non-empty URL).
+   - Check if `yt-dlp` or `ffmpeg` commands exist and handle errors if not installed.
+   - Ensure user folder creation is successful.
+2. **Logging**  
+   - Use Python’s built-in `logging` module (e.g., `logging.info()`, `logging.error()`) to capture:
+     - Login attempts
+     - Download start/finish
+     - Any exceptions or errors
+   - Log format includes timestamps, severity level, and short messages for each event.
+3. **Comments**  
+   - In the code, annotate key functions with docstrings describing purpose, parameters, and returns.
+   - Comment logic blocks that handle edge cases or special conditions.
+
+### 3.7 Single-Container Deployment
+1. **Requirements**  
+   - One Dockerfile that includes:
+     - `python:3.x-slim` as base
+     - `apt-get install ffmpeg` for conversion
+     - `pip install Flask, yt-dlp, bcrypt, etc.`
+   - The Flask app (`app.py`), templates, static files, plus `users.json`.
+2. **Run**  
+   - `docker run -p 5000:5000 -v /host/downloads:/app/downloads flac-downloader:latest`
+3. **Error Handling**  
+   - If container lacks permission to create or write in `/app/downloads`, log an error.
+4. **Logging**  
+   - The container logs can be observed via `docker logs <container-id>`.
+
+### 3.8 GitHub Actions (CI/CD)
+1. **Workflow File**  
+   - `.github/workflows/main.yml` triggers on `push` to `main` or on PR merges.
+   - Steps:
+     1. **Checkout** code
+     2. **Set up Python** environment (optional for tests)
+     3. **Build** Docker image (`docker build -t <repo/name> .`)
+     4. **Login** to Docker registry (Docker Hub or GitHub Packages)
+     5. **Push** the image
+2. **Error Checks**  
+   - Build failures log to GitHub actions console.
+3. **Logging**  
+   - GitHub actions logs each step in the workflow.
+
+---
+
+4. ARCHITECTURE AND WORKFLOW
+----------------------------
+1. **User Access**  
+   - The user navigates to `http://server:5000/`.
+   - If not authenticated, the user is redirected to `/login`.
+2. **Login / Session**  
+   - The user posts username/password; the system checks the local JSON file (which contains hashed passwords).
+   - On success, the system sets `session["logged_in"] = True` (or similar).
+3. **Download Flow**  
+   - User enters a video link → app triggers a new “download job” in the in-memory tracker with status “In Progress.”
+   - A subprocess runs `yt-dlp` + `ffmpeg` for conversion to FLAC.
+   - If successful, the job status changes to “Completed,” and the file is placed under `downloads/<username>`.
+4. **Monitoring**  
+   - The user navigates to their dashboard (e.g., `/status`) to see current and past downloads.
+5. **Logging**  
+   - The application logs each step: login attempt, new download, errors.
+
+---
+
+5. EDGE CASES AND POTENTIAL ERRORS
+----------------------------------
+1. **Invalid YouTube Link**  
+   - `yt-dlp` fails → Subprocess error. Must log `stderr` and show a user-friendly message.
+2. **Missing ffmpeg or yt-dlp**  
+   - Docker image not built with `ffmpeg` or `yt-dlp`. The app fails at runtime. Must confirm installation in Dockerfile.
+3. **Special Characters in Titles**  
+   - The system sanitizes them or replaces with underscores.  
+4. **User Folder Already Exists / Permissions**  
+   - On Windows vs. Linux host, permission issues may arise. Ensure correct volume mounting and user permissions.
+5. **Server Crash**  
+   - In-memory tracking is lost if the server restarts mid-download. The job can’t be resumed.  
+6. **Multiple Users**  
+   - Two users starting the same video link at the same time. The system handles them separately because each has their own folder.
+
+---
+
+6. STEP-BY-STEP IMPLEMENTATION PHASES
+-------------------------------------
+### Phase 1: Basic Setup
+1. Initialize a new repository.
+2. Create a `requirements.txt` (Flask, yt-dlp, bcrypt, etc.).
+3. Write a simple `app.py` with:
+   - A home route
+   - A login route
+   - Basic session setup
+
+### Phase 2: User Authentication
+1. Prepare `users.json` with hashed password entries.
+2. Implement login logic:
+   - Check `username`/`password`.
+   - Set session data if valid.
+   - Return error if invalid.
+3. Add a logout route that clears the session.
+
+### Phase 3: FLAC Download & User-Specific Folders
+1. Implement a route `/download` that:
+   - Creates `downloads/<username>` if not existing.
+   - Calls `yt-dlp` in a subprocess with `--audio-format flac`.
+   - Logs success/failure in both console and any logging system.
+2. Generate sanitized file names: `"<safe_title> [%(id)s].%(ext)s"`.
+
+### Phase 4: In-Memory Tracking & Status Page
+1. Define a global dictionary to keep track of jobs.
+2. Each download request adds an entry to the user’s list: `{ "title": "...", "status": "in_progress" }`.
+3. On success, update to `"status": "completed"`.
+4. Create a `/status` route that renders a table of the user’s items.
+
+### Phase 5: Modern, Responsive UI
+1. Integrate **Bootstrap** (CSS + JavaScript from a CDN).
+2. Update templates:
+   - `login.html` for login form
+   - `index.html` for main input form
+   - `status.html` for job tracking
+   - Use consistent, mobile-friendly styling.
+
+### Phase 6: Docker and Volume Mounting
+1. Create a `Dockerfile`:
+   - Base from `python:3.x-slim`
+   - `RUN apt-get install ffmpeg`
+   - `pip install -r requirements.txt`
+   - Copy app files
+   - `CMD ["python", "app.py"]`
+2. Build and run the container with volume mapping.
+
+### Phase 7: GitHub Actions (CI/CD)
+1. In `.github/workflows/main.yml`, define:
+   - `on: [push]`
+   - Steps to build Docker, login to registry, push image
+2. Verify that the workflow logs in properly and pushes the built image.
+
+### Phase 8: Testing and Validation
+1. Test with valid and invalid YouTube links.
+2. Test multiple simultaneous downloads from different user accounts.
+3. Check iPhone responsiveness and error display.
+
+---
+
+7. SAMPLE CODE SNIPPETS
+-----------------------
+Below are **high-level code snippets** illustrating key points (not a full implementation).
+
+1. **User Check & Login**  
+   ```python
+   import bcrypt, json
+
+   def load_users():
+       with open("users.json", "r") as f:
+           data = json.load(f)
+           return {u["username"]: u["password_hash"] for u in data["users"]}
+
+   USERS = load_users()
+
+   @app.route('/login', methods=['GET', 'POST'])
+   def login():
+       if request.method == 'POST':
+           username = request.form['username']
+           password = request.form['password'].encode('utf-8')
+           hashed = USERS.get(username)
+
+           if hashed and bcrypt.checkpw(password, hashed.encode('utf-8')):
+               session['logged_in'] = True
+               session['username'] = username
+               return redirect(url_for('index'))
+           else:
+               logging.warning(f"Failed login for user: {username}")
+               return render_template('login.html', error="Invalid credentials")
+       return render_template('login.html')
+
+	2.	Downloading & Tracking
+
+downloads_status = {}
+
+@app.route('/download', methods=['POST'])
+def download():
+    if 'logged_in' not in session or not session['logged_in']:
+        return redirect(url_for('login'))
+
+    url = request.form.get('url', '').strip()
+    user = session['username']
+
+    # Initialize tracking dictionary for user if not existing
+    if user not in downloads_status:
+        downloads_status[user] = []
+
+    job_id = str(uuid.uuid4())
+    downloads_status[user].append({
+        "id": job_id,
+        "title": "Unknown Title",  # will update after we fetch
+        "status": "in_progress"
+    })
+
+    user_dir = os.path.join("downloads", user)
+    os.makedirs(user_dir, exist_ok=True)
+
+    # Fetch the title
+    title_cmd = ["yt-dlp", "--print", "%(title)s", url]
+    proc_title = subprocess.run(title_cmd, capture_output=True, text=True)
+    if proc_title.returncode != 0:
+        logging.error(f"Failed to get title: {proc_title.stderr}")
+        downloads_status[user][-1]["status"] = "failed"
+        return "Failed to retrieve title."
+
+    raw_title = proc_title.stdout.strip()
+    safe_title = re.sub(r'[^A-Za-z0-9_\-$begin:math:text$$end:math:text$$begin:math:display$$end:math:display$\s]+', '_', raw_title)
+
+    # Update job title
+    downloads_status[user][-1]["title"] = safe_title
+
+    # Build output template
+    output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
+
+    # Actual download
+    cmd = ["yt-dlp", "-x", "--audio-format", "flac", "-o", output_tmpl, url]
+    proc_download = subprocess.run(cmd, capture_output=True, text=True)
+
+    if proc_download.returncode == 0:
+        downloads_status[user][-1]["status"] = "completed"
+        logging.info(f"Download successful: user={user}, title={safe_title}")
+        return f"Download completed for '{safe_title}'!"
+    else:
+        downloads_status[user][-1]["status"] = "failed"
+        logging.error(f"Download failed: {proc_download.stderr}")
+        return "Download failed. Check logs."
+
+
+	3.	Status Page
+
+@app.route('/status')
+def status():
+    if 'logged_in' not in session or not session['logged_in']:
+        return redirect(url_for('login'))
+
+    user = session['username']
+    user_downloads = downloads_status.get(user, [])
+    return render_template('status.html', downloads=user_downloads)
+
+	8.	CONCLUSION
+
+By following this PRD and the step-by-step instructions, developers can build a robust FLAC Downloader:
+	•	Secure, session-based login with a JSON user store
+	•	Organized per-user FLAC storage
+	•	Real-time tracking of downloads in memory
+	•	Modern, mobile-friendly UI
+	•	Thorough error handling and logging
+	•	Single-container Docker deployment
+	•	Automated CI/CD via GitHub Actions
+
+This solution serves the ultimate goal: enabling users to effortlessly fetch, track, and store FLAC audio conversions in a well-organized, user-friendly, and secure manner—all in a single, self-contained application.

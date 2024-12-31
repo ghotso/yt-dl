@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <h2 class="card-title text-center mb-4">Download FLAC Audio</h2>
+            <form method="POST" action="{{ url_for('download') }}">
+                <div class="mb-3">
+                    <label for="url" class="form-label">YouTube URL</label>
+                    <input type="url" class="form-control" id="url" name="url" 
+                           placeholder="https://www.youtube.com/watch?v=..." required autofocus>
+                    <div class="form-text">Enter a YouTube video URL to download its audio in FLAC format.</div>
+                </div>
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-download me-2"></i>Download
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+        <div class="card-body">
+            <h5 class="card-title">Instructions</h5>
+            <ol class="mb-0">
+                <li>Paste a valid YouTube video URL in the input field above</li>
+                <li>Click the Download button to start the conversion</li>
+                <li>Monitor the download progress on the <a href="{{ url_for('status') }}">Status page</a></li>
+                <li>Once completed, your FLAC file will be available in your personal downloads folder</li>
+            </ol>
+        </div>
+    </div>
+</div>
+{% endblock %} 

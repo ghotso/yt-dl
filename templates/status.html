@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Download Status{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <h2 class="mb-4">Download Status</h2>
+
+    {% if not downloads %}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle me-2"></i>No downloads yet. 
+        <a href="{{ url_for('index') }}" class="alert-link">Start a new download</a>
+    </div>
+    {% else %}
+    <div class="row">
+        {% for download in downloads|reverse %}
+        <div class="col-12">
+            <div class="card status-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">{{ download.title }}</h5>
+                        <span class="badge {% if download.status == 'completed' %}bg-success{% elif download.status == 'failed' %}bg-danger{% else %}bg-warning{% endif %}">
+                            {{ download.status|title }}
+                        </span>
+                    </div>
+                    <p class="card-text text-muted mt-2 mb-0">
+                        <small>
+                            <i class="bi bi-link-45deg"></i> 
+                            <a href="{{ download.url }}" target="_blank" rel="noopener noreferrer">{{ download.url }}</a>
+                        </small>
+                    </p>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="mt-4">
+        <a href="{{ url_for('index') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle me-2"></i>New Download
+        </a>
+    </div>
+</div>
+{% endblock %} 
