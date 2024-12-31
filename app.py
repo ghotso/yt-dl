@@ -5,6 +5,7 @@ import uuid
 import bcrypt
 import logging
 import subprocess
+import threading
 from flask import Flask, request, render_template, redirect, url_for, session, flash
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -24,6 +25,56 @@ app.config['DOWNLOAD_DIR'] = os.environ.get('DOWNLOAD_DIR', 'downloads')
 
 # In-memory download tracking
 downloads_status = {}
+
+def process_download(url, user, job_id):
+    """Process download in a separate thread."""
+    try:
+        user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
+        os.makedirs(user_dir, exist_ok=True)
+
+        # Get video title
+        title_cmd = ["yt-dlp", "--print", "%(title)s", url]
+        proc_title = subprocess.run(title_cmd, capture_output=True, text=True)
+        
+        if proc_title.returncode != 0:
+            raise Exception(f"Failed to get title: {proc_title.stderr}")
+
+        raw_title = proc_title.stdout.strip()
+        safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
+
+        # Update job with title
+        for job in downloads_status[user]:
+            if job["id"] == job_id:
+                job["title"] = safe_title
+                break
+
+        # Build output template
+        output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
+
+        # Download and convert to FLAC
+        cmd = ["yt-dlp", "-x", "--audio-format", "flac", "-o", output_tmpl, url]
+        proc_download = subprocess.run(cmd, capture_output=True, text=True)
+
+        # Update job status
+        for job in downloads_status[user]:
+            if job["id"] == job_id:
+                if proc_download.returncode == 0:
+                    job["status"] = "completed"
+                    logger.info(f"Download completed: user={user}, title={safe_title}")
+                else:
+                    job["status"] = "failed"
+                    job["error"] = proc_download.stderr
+                    logger.error(f"Download failed: user={user}, error={proc_download.stderr}")
+                break
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Download failed: user={user}, error={error_msg}")
+        for job in downloads_status[user]:
+            if job["id"] == job_id:
+                job["status"] = "failed"
+                job["error"] = error_msg
+                break
 
 def verify_password(password, hashed):
     """Verify a password against a hash."""
@@ -110,48 +161,18 @@ def download():
     job_id = str(uuid.uuid4())
     job = {
         "id": job_id,
-        "title": "Unknown Title",
+        "title": "Fetching title...",
         "status": "in_progress",
         "url": url
     }
     downloads_status[user].append(job)
 
-    # Ensure user directory exists
-    user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
-    os.makedirs(user_dir, exist_ok=True)
+    # Start download process in a separate thread
+    thread = threading.Thread(target=process_download, args=(url, user, job_id))
+    thread.daemon = True
+    thread.start()
 
-    try:
-        # Get video title
-        title_cmd = ["yt-dlp", "--print", "%(title)s", url]
-        proc_title = subprocess.run(title_cmd, capture_output=True, text=True)
-        
-        if proc_title.returncode != 0:
-            raise Exception(f"Failed to get title: {proc_title.stderr}")
-
-        raw_title = proc_title.stdout.strip()
-        safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
-        job["title"] = safe_title
-
-        # Build output template
-        output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
-
-        # Download and convert to FLAC
-        cmd = ["yt-dlp", "-x", "--audio-format", "flac", "-o", output_tmpl, url]
-        proc_download = subprocess.run(cmd, capture_output=True, text=True)
-
-        if proc_download.returncode == 0:
-            job["status"] = "completed"
-            logger.info(f"Download completed: user={user}, title={safe_title}")
-            flash(f'Download completed for "{safe_title}"!', 'success')
-        else:
-            raise Exception(proc_download.stderr)
-
-    except Exception as e:
-        job["status"] = "failed"
-        error_msg = str(e)
-        logger.error(f"Download failed: user={user}, error={error_msg}")
-        flash(f'Download failed: {error_msg}', 'error')
-
+    flash('Download started! Check the status page for progress.', 'success')
     return redirect(url_for('status'))
 
 @app.route('/status')

@@ -29,6 +29,14 @@
                             <a href="{{ download.url }}" target="_blank" rel="noopener noreferrer">{{ download.url }}</a>
                         </small>
                     </p>
+                    {% if download.status == 'failed' and download.error %}
+                    <div class="alert alert-danger mt-2 mb-0">
+                        <small>
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            Error: {{ download.error }}
+                        </small>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>

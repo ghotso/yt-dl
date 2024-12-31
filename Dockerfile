@@ -21,5 +21,5 @@ RUN mkdir -p downloads
 # Expose port
 EXPOSE 5000
 
-# Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"] 
+# Run the application with increased timeout
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "300", "--workers", "2", "app:app"] 
