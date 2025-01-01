@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 📚 Documentation
-    url: https://github.com/ghotso/ytdl-spotdl-flac/wiki
+    url: https://github.com/ghotso/ytdl-spotdl-manager/wiki
     about: Check our documentation before creating an issue
   - name: 💬 Discussions
-    url: https://github.com/ghotso/ytdl-spotdl-flac/discussions
+    url: https://github.com/ghotso/ytdl-spotdl-manager/discussions
     about: Ask questions and share ideas 
