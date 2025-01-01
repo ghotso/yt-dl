@@ -14,6 +14,15 @@
 
 </div>
 
+## 🙏 Credits
+
+This application is built upon and depends on these amazing open source projects:
+
+- [**spotDL**](https://github.com/spotDL/spotify-downloader) - Download Spotify songs with metadata
+- [**yt-dlp**](https://github.com/yt-dlp/yt-dlp) - Download YouTube videos and extract audio
+
+We are grateful to the maintainers and contributors of these projects for making high-quality audio downloading possible.
+
 ## ✨ Features
 
 ### 🎵 Audio Downloads
