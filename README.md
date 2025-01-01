@@ -2,10 +2,10 @@
 
 <div align="center">
 
-[![GitHub license](https://img.shields.io/github/license/ghotso/ytdl-spotdl-flac)](https://github.com/ghotso/ytdl-spotdl-flac/blob/main/LICENSE)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ghotso/ytdl-spotdl-flac)](https://github.com/ghotso/ytdl-spotdl-flac/pkgs/container/ytdl-spotdl-flac)
-[![GitHub issues](https://img.shields.io/github/issues/ghotso/ytdl-spotdl-flac)](https://github.com/ghotso/ytdl-spotdl-flac/issues)
-[![GitHub stars](https://img.shields.io/github/stars/ghotso/ytdl-spotdl-flac)](https://github.com/ghotso/ytdl-spotdl-flac/stargazers)
+[![GitHub license](https://img.shields.io/github/license/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/blob/main/LICENSE)
+[![Docker Pulls](https://img.shields.io/docker/pulls/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/pkgs/container/ytdl-spotdl-manager)
+[![GitHub issues](https://img.shields.io/github/issues/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/issues)
+[![GitHub stars](https://img.shields.io/github/stars/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/stargazers)
 
 🎧 A beautiful web interface for downloading high-quality FLAC audio from YouTube and Spotify
 
