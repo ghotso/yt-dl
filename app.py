@@ -9,7 +9,7 @@ import threading
 import time
 import queue
 from dataclasses import dataclass
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from urllib.parse import urlparse
 from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -20,6 +20,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+AUDIO_FORMATS: List[Tuple[str, str]] = [
+    ("flac", "FLAC (Lossless)"),
+    ("wav", "WAV (Lossless)"),
+    ("aac", "AAC (High Quality)"),
+    ("m4a", "M4A (High Quality)"),
+    ("opus", "Opus (High Quality)"),
+    ("vorbis", "Vorbis (High Quality)"),
+    ("mp3", "MP3 (Compatible)")
+]
 
 @dataclass
 class DownloadTask:
@@ -258,34 +268,31 @@ def is_spotify_url(url):
     parsed = urlparse(url)
     return parsed.netloc in ['open.spotify.com', 'spotify.com']
 
+def get_format_fallbacks(preferred_format: str) -> List[str]:
+    """Get list of formats to try in order of preference."""
+    format_order = [f[0] for f in AUDIO_FORMATS]
+    try:
+        start_index = format_order.index(preferred_format)
+        return format_order[start_index:] + format_order[:start_index]
+    except ValueError:
+        return format_order  # If preferred format not found, try all formats
+
 def process_spotify_download(url, user_dir, safe_title=None, speed_limit=None):
-    """Download a Spotify track using spotdl."""
-    # First try with FLAC
-    cmd = [
-        "spotdl",
-        "--output", user_dir,
-        "--format", "flac",
-        "--bitrate", "1411k",  # CD quality FLAC
-        "--save-file", os.path.join(user_dir, "spotdl.temp.txt"),  # Save metadata
-        "--threads", "1",  # Avoid race conditions
-        "--lyrics",  # Include lyrics if available
-    ]
+    """Download a Spotify track."""
+    # Get user's preferred format
+    users_data = load_users()
+    user = next((u for u in users_data['users'] if u['username'] == session['username']), None)
+    preferred_format = user.get('default_format', 'flac')
     
-    # Add speed limit if specified (convert MB/s to bytes/s)
-    if speed_limit:
-        cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+    # Get format fallbacks
+    formats_to_try = get_format_fallbacks(preferred_format)
     
-    cmd.append(url)
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    # If FLAC fails, try high quality MP3
-    if result.returncode != 0:
-        logger.warning(f"FLAC download failed for {url}, trying MP3 fallback")
+    for audio_format in formats_to_try:
         cmd = [
             "spotdl",
             "--output", user_dir,
-            "--format", "mp3",
-            "--bitrate", "320k",  # Highest quality MP3
+            "--format", audio_format,
+            "--bitrate", "1411k" if audio_format in ['flac', 'wav'] else "320k",
             "--save-file", os.path.join(user_dir, "spotdl.temp.txt"),
             "--threads", "1",
             "--lyrics",
@@ -297,6 +304,12 @@ def process_spotify_download(url, user_dir, safe_title=None, speed_limit=None):
         
         cmd.append(url)
         result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            logger.info(f"Successfully downloaded in {audio_format} format")
+            break
+        else:
+            logger.warning(f"Failed to download in {audio_format} format, trying next format")
     
     # Clean up temp file
     temp_file = os.path.join(user_dir, "spotdl.temp.txt")
@@ -309,45 +322,29 @@ def process_spotify_download(url, user_dir, safe_title=None, speed_limit=None):
     return result
 
 def process_youtube_download(url, user_dir, safe_title, speed_limit=None):
-    """Download a YouTube video and convert to FLAC."""
+    """Download a YouTube video and convert to audio."""
     output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
     
-    # First try with FLAC
-    cmd = [
-        "yt-dlp",
-        "-x",
-        "--audio-format", "flac",
-        "--audio-quality", "0",
-        "--embed-thumbnail",  # Add thumbnail as cover art
-        "--embed-metadata",   # Include metadata
-        "--parse-metadata", "%(title)s:%(meta_title)s",
-        "--parse-metadata", "%(uploader)s:%(meta_artist)s",
-        "--add-metadata",
-        "--progress",  # Show progress
-        "-o", output_tmpl,
-    ]
+    # Get user's preferred format
+    users_data = load_users()
+    user = next((u for u in users_data['users'] if u['username'] == session['username']), None)
+    preferred_format = user.get('default_format', 'flac')
     
-    # Add speed limit if specified (convert MB/s to bytes/s)
-    if speed_limit:
-        cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+    # Get format fallbacks
+    formats_to_try = get_format_fallbacks(preferred_format)
     
-    cmd.append(url)
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    # If FLAC fails, try high quality MP3
-    if result.returncode != 0:
-        logger.warning(f"FLAC download failed for {url}, trying MP3 fallback")
+    for audio_format in formats_to_try:
         cmd = [
             "yt-dlp",
             "-x",
-            "--audio-format", "mp3",
+            "--audio-format", audio_format,
             "--audio-quality", "0",
-            "--embed-thumbnail",
-            "--embed-metadata",
+            "--embed-thumbnail",  # Add thumbnail as cover art
+            "--embed-metadata",   # Include metadata
             "--parse-metadata", "%(title)s:%(meta_title)s",
             "--parse-metadata", "%(uploader)s:%(meta_artist)s",
             "--add-metadata",
-            "--progress",
+            "--progress",  # Show progress
             "-o", output_tmpl,
         ]
         
@@ -357,8 +354,15 @@ def process_youtube_download(url, user_dir, safe_title, speed_limit=None):
         
         cmd.append(url)
         result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            logger.info(f"Successfully downloaded in {audio_format} format")
+            return result
+        else:
+            logger.warning(f"Failed to download in {audio_format} format, trying next format")
     
-    return result
+    # If all formats failed
+    return result  # Return the last failed result
 
 def get_title(url):
     """Get the title of the track/video."""
@@ -953,6 +957,29 @@ def batch_download():
 
     flash(f'Added {len(urls)} downloads to queue! Check the status page for progress.', 'success')
     return redirect(url_for('status'))
+
+@app.route('/profile/update_format', methods=['POST'])
+def update_format_preference():
+    """Update user's preferred audio format."""
+    if 'username' not in session:
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+
+    new_format = request.form.get('default_format')
+    if not new_format or new_format not in [f[0] for f in AUDIO_FORMATS]:
+        flash('Invalid format selection', 'error')
+        return redirect(url_for('profile'))
+
+    users_data = load_users()
+    for user in users_data['users']:
+        if user['username'] == session['username']:
+            user['default_format'] = new_format
+            if save_users(users_data):
+                flash('Audio format preference updated successfully', 'success')
+            else:
+                flash('Failed to update format preference', 'error')
+            break
+
+    return redirect(url_for('profile'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 
