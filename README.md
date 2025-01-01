@@ -4,6 +4,7 @@
 
 [![GitHub license](https://img.shields.io/github/license/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/blob/main/LICENSE)
 [![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/ghotso/ytdl-spotdl-manager/pkgs/container/ytdl-spotdl-manager)
+[![Package Version](https://img.shields.io/github/v/release/ghotso/ytdl-spotdl-manager?include_prereleases&sort=semver)](https://github.com/ghotso/ytdl-spotdl-manager/releases)
 [![GitHub issues](https://img.shields.io/github/issues/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/stargazers)
 
