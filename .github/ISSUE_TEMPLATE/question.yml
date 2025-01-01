@@ -1,0 +1,69 @@
+name: ❓ Question
+description: Ask a question about this project
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your interest in the project! Please make sure you've checked the documentation and existing issues before asking a question.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: ❓ Your Question
+      description: What would you like to know?
+      placeholder: I'd like to understand...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 📝 Context
+      description: What are you trying to achieve? This will help us provide a more helpful answer.
+      placeholder: I'm trying to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: research
+    attributes:
+      label: 🔍 What I've Tried
+      description: What documentation have you read or solutions have you tried?
+      placeholder: |
+        - I've looked at...
+        - I've tried...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: 📑 Question Category
+      description: What area does your question relate to?
+      options:
+        - Installation/Setup
+        - Usage/Features
+        - Configuration
+        - Performance
+        - Security
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 🖥️ Environment
+      description: Please provide details about your environment if relevant
+      placeholder: |
+        - OS: [e.g., Ubuntu 20.04]
+        - Version: [e.g., v1.0.0]
+        - Browser: [if relevant]
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: 📌 Additional Information
+      description: Any other details that might help us answer your question
+      placeholder: Screenshots, error messages, or other relevant details... 

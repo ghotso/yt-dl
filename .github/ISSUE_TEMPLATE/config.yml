@@ -1,17 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 📚 Documentation Wiki
+  - name: 📚 Documentation
     url: https://github.com/ghotso/ytdl-spotdl-flac/wiki
-    about: Check our comprehensive documentation before creating an issue
-  - name: 💬 GitHub Discussions
+    about: Check our documentation before creating an issue
+  - name: 💬 Discussions
     url: https://github.com/ghotso/ytdl-spotdl-flac/discussions
-    about: For general questions and community discussions
-  - name: 🤝 Contributing Guidelines
-    url: https://github.com/ghotso/ytdl-spotdl-flac/blob/main/CONTRIBUTING.md
-    about: Learn how to contribute to the project
-  - name: 🔒 Security Issues
-    url: https://github.com/ghotso/ytdl-spotdl-flac/security/policy
-    about: Please report security vulnerabilities here
-  - name: 📖 Common Issues
-    url: https://github.com/ghotso/ytdl-spotdl-flac#-common-issues
-    about: Check our list of common issues and solutions 
+    about: Ask questions and share ideas 
