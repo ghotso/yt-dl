@@ -290,34 +290,25 @@ def process_spotify_download(url, user_dir, safe_title=None, speed_limit=None):
     for audio_format in formats_to_try:
         cmd = [
             "spotdl",
-            "--output", user_dir,
+            url,
             "--format", audio_format,
-            "--bitrate", "1411k" if audio_format in ['flac', 'wav'] else "320k",
-            "--save-file", os.path.join(user_dir, "spotdl.temp.txt"),
-            "--threads", "1",
+            "--output", user_dir,
+            "--print-errors",
             "--lyrics",
+            "--threads", "1"
         ]
         
         # Add speed limit if specified
         if speed_limit:
-            cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+            cmd.extend(["--yt-dlp-args", f"--limit-rate {int(speed_limit * 1024 * 1024)}"])
         
-        cmd.append(url)
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0:
             logger.info(f"Successfully downloaded in {audio_format} format")
             break
         else:
-            logger.warning(f"Failed to download in {audio_format} format, trying next format")
-    
-    # Clean up temp file
-    temp_file = os.path.join(user_dir, "spotdl.temp.txt")
-    if os.path.exists(temp_file):
-        try:
-            os.remove(temp_file)
-        except OSError:
-            pass
+            logger.warning(f"Failed to download in {audio_format} format, trying next format: {result.stderr}")
     
     return result
 
@@ -367,12 +358,15 @@ def process_youtube_download(url, user_dir, safe_title, speed_limit=None):
 def get_title(url):
     """Get the title of the track/video."""
     if is_spotify_url(url):
-        cmd = ["spotdl", "--print-url", url]
+        cmd = ["spotdl", "--print-errors", url]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise Exception(f"Failed to get Spotify track info: {proc.stderr}")
-        # spotdl outputs multiple lines, we want the first one which contains the title
-        return proc.stdout.strip().split('\n')[0]
+        # Parse output for title
+        for line in proc.stdout.strip().split('\n'):
+            if 'Title:' in line:
+                return line.split('Title:', 1)[1].strip()
+        raise Exception("Could not find title in Spotify track info")
     else:
         cmd = ["yt-dlp", "--print", "%(title)s", url]
         proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -386,14 +380,21 @@ def process_download(url, user, job_id, speed_limit=None):
         user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
         os.makedirs(user_dir, exist_ok=True)
 
-        # Get title
-        raw_title = get_title(url)
-        safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
+        # Get title and update initial status
+        try:
+            raw_title = get_title(url)
+            safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
+        except Exception as e:
+            logger.error(f"Failed to get title: {str(e)}")
+            safe_title = "Unknown Title"
+            raw_title = "Unknown Title"
 
-        # Update job with title
+        # Always create an initial status entry
         update_job_status(user, job_id, {
-            "title": safe_title,
-            "started_at": time.strftime("%Y-%m-%d %H:%M:%S")
+            "title": raw_title,
+            "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "url": url,
+            "status": "in_progress"
         })
 
         # Download based on URL type
@@ -410,12 +411,13 @@ def process_download(url, user, job_id, speed_limit=None):
             })
             logger.info(f"Download completed: user={user}, title={safe_title}")
         else:
+            error_msg = proc_download.stderr or "Unknown error occurred"
             update_job_status(user, job_id, {
                 "status": "failed",
-                "error": proc_download.stderr,
+                "error": error_msg,
                 "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
             })
-            logger.error(f"Download failed: user={user}, error={proc_download.stderr}")
+            logger.error(f"Download failed: user={user}, error={error_msg}")
 
     except Exception as e:
         error_msg = str(e)
@@ -438,7 +440,9 @@ def load_users():
         default_users = {
             "users": [{
                 "username": "admin",
-                "password_hash": hash_password("admin")
+                "password_hash": hash_password("admin"),
+                "role": "admin",
+                "default_format": "flac"
             }]
         }
         with open(app.config['USERS_FILE'], 'w') as f:
@@ -451,7 +455,9 @@ def load_users():
         return {
             "users": [{
                 "username": "admin",
-                "password_hash": hash_password("admin")
+                "password_hash": hash_password("admin"),
+                "role": "admin",
+                "default_format": "flac"
             }]
         }
 
@@ -497,7 +503,9 @@ def get_user_data(username):
 
 def is_admin(username):
     """Check if user is admin."""
-    return username == 'admin'
+    users_data = load_users()
+    user = next((u for u in users_data['users'] if u['username'] == username), None)
+    return user and user.get('role') == 'admin'
 
 @app.before_request
 def check_auth():
@@ -646,31 +654,33 @@ def update_username(old_username, new_username):
     
     try:
         # 1. Update username in users.json
-        for user in users_data["users"]:
-            if user["username"] == old_username:
-                user["username"] = new_username
-                if not save_users(users_data):
-                    raise Exception("Failed to save user data")
-                
-                # 2. Update status data
-                status_data = load_status()
-                if old_username in status_data:
-                    status_data[new_username] = status_data.pop(old_username)
-                    if not save_status(status_data):
-                        raise Exception("Failed to save status data")
-                
-                # 3. Update downloads directory
-                old_dir = os.path.join(app.config['DOWNLOAD_DIR'], old_username)
-                new_dir = os.path.join(app.config['DOWNLOAD_DIR'], new_username)
-                if os.path.exists(old_dir):
-                    os.makedirs(os.path.dirname(new_dir), exist_ok=True)
-                    try:
-                        os.rename(old_dir, new_dir)
-                    except OSError as e:
-                        raise Exception(f"Failed to rename downloads directory: {str(e)}")
-                
-                return True
-                
+        user = next((u for u in users_data["users"] if u["username"] == old_username), None)
+        if not user:
+            raise Exception("User not found")
+            
+        user["username"] = new_username
+        if not save_users(users_data):
+            raise Exception("Failed to save user data")
+            
+        # 2. Update status data
+        status_data = load_status()
+        if old_username in status_data:
+            status_data[new_username] = status_data.pop(old_username)
+            if not save_status(status_data):
+                raise Exception("Failed to save status data")
+        
+        # 3. Update downloads directory
+        old_dir = os.path.join(app.config['DOWNLOAD_DIR'], old_username)
+        new_dir = os.path.join(app.config['DOWNLOAD_DIR'], new_username)
+        if os.path.exists(old_dir):
+            os.makedirs(os.path.dirname(new_dir), exist_ok=True)
+            try:
+                os.rename(old_dir, new_dir)
+            except OSError as e:
+                raise Exception(f"Failed to rename downloads directory: {str(e)}")
+        
+        return True
+        
     except Exception as e:
         # Rollback on any error
         logger.error(f"Username update failed, rolling back: {str(e)}")
@@ -686,9 +696,7 @@ def update_username(old_username, new_username):
             except OSError:
                 logger.error(f"Failed to rollback directory rename from {new_dir} to {old_dir}")
         
-        raise Exception(f"Failed to update username: {str(e)}")
-        
-    return False
+        return False
 
 def create_user(username, password):
     """Create a new user."""
@@ -698,7 +706,9 @@ def create_user(username, password):
     
     users_data["users"].append({
         "username": username,
-        "password_hash": hash_password(password)
+        "password_hash": hash_password(password),
+        "role": "user",
+        "default_format": "flac"
     })
     return save_users(users_data)
 
@@ -739,8 +749,18 @@ def update_user_username():
 
     try:
         if update_username(session['username'], new_username):
+            # Store the user's role before updating session
+            was_admin = is_admin(session['username'])
             session['username'] = new_username
             flash('Username updated successfully', 'success')
+            
+            # If user was admin, ensure they keep admin access
+            if was_admin and not is_admin(new_username):
+                users_data = load_users()
+                user = next((u for u in users_data['users'] if u['username'] == new_username), None)
+                if user:
+                    user['role'] = 'admin'
+                    save_users(users_data)
         else:
             flash('Failed to update username. It might already be taken.', 'error')
     except Exception as e:
@@ -887,23 +907,40 @@ def preview():
 
     try:
         if is_spotify_url(url):
-            # Get Spotify track info
-            cmd = ["spotdl", "--print-url", url]
+            # Get Spotify track info using spotdl
+            cmd = ["spotdl", "--print-errors", url]
             proc = subprocess.run(cmd, capture_output=True, text=True)
+            
             if proc.returncode != 0:
+                logger.error(f"Spotify preview error: {proc.stderr}")
                 return jsonify({'success': False, 'message': 'Failed to get track info'})
             
             # Parse spotdl output
-            lines = proc.stdout.strip().split('\n')
-            title = lines[0]
-            artist = lines[1] if len(lines) > 1 else "Unknown Artist"
+            output = proc.stdout.strip()
+            title = None
+            artist = None
+            thumbnail = None
+            duration = None
+            
+            for line in output.split('\n'):
+                if 'Title:' in line:
+                    title = line.split('Title:', 1)[1].strip()
+                elif 'Artist:' in line:
+                    artist = line.split('Artist:', 1)[1].strip()
+                elif 'Thumbnail:' in line:
+                    thumbnail = line.split('Thumbnail:', 1)[1].strip()
+                elif 'Duration:' in line:
+                    duration = line.split('Duration:', 1)[1].strip()
+            
+            if not title:
+                return jsonify({'success': False, 'message': 'Could not extract track information'})
             
             return jsonify({
                 'success': True,
                 'title': title,
-                'artist': artist,
-                'thumbnail': lines[2] if len(lines) > 2 else '',
-                'duration': lines[3] if len(lines) > 3 else ''
+                'artist': artist or "Unknown Artist",
+                'thumbnail': thumbnail or "",
+                'duration': duration or ""
             })
         else:
             # Get YouTube video info
