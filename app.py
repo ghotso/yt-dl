@@ -358,15 +358,22 @@ def process_youtube_download(url, user_dir, safe_title, speed_limit=None):
 def get_title(url):
     """Get the title of the track/video."""
     if is_spotify_url(url):
-        cmd = ["spotdl", "--print-errors", url]
+        cmd = ["spotdl", "--print-errors", "--format", "json", url]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise Exception(f"Failed to get Spotify track info: {proc.stderr}")
-        # Parse output for title
-        for line in proc.stdout.strip().split('\n'):
-            if 'Title:' in line:
-                return line.split('Title:', 1)[1].strip()
-        raise Exception("Could not find title in Spotify track info")
+        try:
+            # Try to parse JSON output
+            data = json.loads(proc.stdout.strip())
+            if isinstance(data, list) and len(data) > 0:
+                track = data[0]
+                return f"{track.get('artist', 'Unknown')} - {track.get('name', 'Unknown')}"
+        except json.JSONDecodeError:
+            # Fallback to old parsing method
+            for line in proc.stdout.strip().split('\n'):
+                if 'Title:' in line:
+                    return line.split('Title:', 1)[1].strip()
+            raise Exception("Could not find title in Spotify track info")
     else:
         cmd = ["yt-dlp", "--print", "%(title)s", url]
         proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -377,56 +384,60 @@ def get_title(url):
 def process_download(url, user, job_id, speed_limit=None):
     """Process download in a separate thread."""
     try:
-        user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
-        os.makedirs(user_dir, exist_ok=True)
+        # Create application context
+        with app.app_context():
+            user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
+            os.makedirs(user_dir, exist_ok=True)
 
-        # Get title and update initial status
-        try:
-            raw_title = get_title(url)
-            safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
-        except Exception as e:
-            logger.error(f"Failed to get title: {str(e)}")
-            safe_title = "Unknown Title"
-            raw_title = "Unknown Title"
+            # Get title and update initial status
+            try:
+                raw_title = get_title(url)
+                safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
+            except Exception as e:
+                logger.error(f"Failed to get title: {str(e)}")
+                safe_title = "Unknown Title"
+                raw_title = "Unknown Title"
 
-        # Always create an initial status entry
-        update_job_status(user, job_id, {
-            "title": raw_title,
-            "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "url": url,
-            "status": "in_progress"
-        })
-
-        # Download based on URL type
-        if is_spotify_url(url):
-            proc_download = process_spotify_download(url, user_dir, safe_title, speed_limit)
-        else:
-            proc_download = process_youtube_download(url, user_dir, safe_title, speed_limit)
-
-        # Update job status
-        if proc_download.returncode == 0:
+            # Always create an initial status entry
             update_job_status(user, job_id, {
-                "status": "completed",
-                "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                "title": raw_title,
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "url": url,
+                "status": "in_progress"
             })
-            logger.info(f"Download completed: user={user}, title={safe_title}")
-        else:
-            error_msg = proc_download.stderr or "Unknown error occurred"
+
+            # Download based on URL type
+            if is_spotify_url(url):
+                proc_download = process_spotify_download(url, user_dir, safe_title, speed_limit)
+            else:
+                proc_download = process_youtube_download(url, user_dir, safe_title, speed_limit)
+
+            # Update job status
+            if proc_download.returncode == 0:
+                update_job_status(user, job_id, {
+                    "status": "completed",
+                    "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+                logger.info(f"Download completed: user={user}, title={safe_title}")
+            else:
+                error_msg = proc_download.stderr or "Unknown error occurred"
+                update_job_status(user, job_id, {
+                    "status": "failed",
+                    "error": error_msg,
+                    "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+                logger.error(f"Download failed: user={user}, error={error_msg}")
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Download failed: user={user}, error={error_msg}")
+        # Create application context for error status update
+        with app.app_context():
             update_job_status(user, job_id, {
                 "status": "failed",
                 "error": error_msg,
                 "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
             })
-            logger.error(f"Download failed: user={user}, error={error_msg}")
-
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Download failed: user={user}, error={error_msg}")
-        update_job_status(user, job_id, {
-            "status": "failed",
-            "error": error_msg,
-            "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        })
 
 def load_users():
     """Load users from JSON file."""
