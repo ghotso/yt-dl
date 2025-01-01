@@ -2,10 +2,10 @@
 
 <div align="center">
 
-[![GitHub license](https://img.shields.io/github/license/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/blob/main/LICENSE)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/pkgs/container/ytdl-spotdl-manager)
-[![GitHub issues](https://img.shields.io/github/issues/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/issues)
-[![GitHub stars](https://img.shields.io/github/stars/ghotso/yt-dl)](https://github.com/ghotso/yt-dl/stargazers)
+[![GitHub license](https://img.shields.io/github/license/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/blob/main/LICENSE)
+[![Docker Pulls](https://img.shields.io/docker/pulls/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/pkgs/container/ytdl-spotdl-manager)
+[![GitHub issues](https://img.shields.io/github/issues/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/issues)
+[![GitHub stars](https://img.shields.io/github/stars/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/stargazers)
 
 🎧 A beautiful web interface for downloading high-quality FLAC audio from YouTube and Spotify
 
@@ -48,12 +48,12 @@ mkdir -p data downloads
 
 2. Run with Docker:
 ```bash
-docker pull ghcr.io/ghotso/ytdl-spotdl-flac:latest
+docker pull ghcr.io/ghotso/ytdl-spotdl-manager:latest
 
 docker run -p 5000:5000 \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/downloads:/app/downloads \
-  ghcr.io/ghotso/ytdl-spotdl-flac:latest
+  ghcr.io/ghotso/ytdl-spotdl-manager:latest
 ```
 
 3. Access at `http://localhost:5000`
