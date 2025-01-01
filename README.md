@@ -3,7 +3,7 @@
 <div align="center">
 
 [![GitHub license](https://img.shields.io/github/license/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/blob/main/LICENSE)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ghcr.io/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/pkgs/container/ytdl-spotdl-manager)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/ghotso/ytdl-spotdl-manager/pkgs/container/ytdl-spotdl-manager)
 [![GitHub issues](https://img.shields.io/github/issues/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ghotso/ytdl-spotdl-manager)](https://github.com/ghotso/ytdl-spotdl-manager/stargazers)
 
