@@ -7,6 +7,9 @@ import logging
 import subprocess
 import threading
 import time
+import queue
+from dataclasses import dataclass
+from typing import Optional, Dict, List
 from urllib.parse import urlparse
 from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -17,6 +20,141 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@dataclass
+class DownloadTask:
+    """Represents a download task in the queue."""
+    id: str
+    url: str
+    user: str
+    priority: int = 0
+    paused: bool = False
+    speed_limit: Optional[float] = None  # in MB/s
+    progress: float = 0.0
+    title: Optional[str] = None
+    status: str = "queued"
+    error: Optional[str] = None
+
+class DownloadQueue:
+    """Manages download queue and concurrent downloads."""
+    def __init__(self, max_concurrent: int = 2):
+        self.queue = queue.PriorityQueue()
+        self.active_downloads: Dict[str, DownloadTask] = {}
+        self.max_concurrent = max_concurrent
+        self.lock = threading.Lock()
+        self.global_speed_limit: Optional[float] = None  # in MB/s
+        
+        # Start queue processor
+        self.processor_thread = threading.Thread(target=self._process_queue)
+        self.processor_thread.daemon = True
+        self.processor_thread.start()
+    
+    def add_task(self, task: DownloadTask) -> None:
+        """Add a task to the queue."""
+        # Priority queue sorts by first element, negative to make higher priority come first
+        self.queue.put((-task.priority, task))
+        logger.info(f"Added task to queue: {task.id}")
+    
+    def pause_task(self, task_id: str) -> bool:
+        """Pause a download task."""
+        with self.lock:
+            if task_id in self.active_downloads:
+                self.active_downloads[task_id].paused = True
+                return True
+            # Search in queue
+            with self.queue.mutex:
+                for _, task in self.queue.queue:
+                    if task.id == task_id:
+                        task.paused = True
+                        return True
+        return False
+    
+    def resume_task(self, task_id: str) -> bool:
+        """Resume a paused download task."""
+        with self.lock:
+            if task_id in self.active_downloads:
+                self.active_downloads[task_id].paused = False
+                return True
+            # Search in queue
+            with self.queue.mutex:
+                for _, task in self.queue.queue:
+                    if task.id == task_id:
+                        task.paused = False
+                        return True
+        return False
+    
+    def set_global_speed_limit(self, limit: Optional[float]) -> None:
+        """Set global speed limit in MB/s."""
+        self.global_speed_limit = limit
+        logger.info(f"Set global speed limit to: {limit} MB/s")
+    
+    def get_all_tasks(self) -> List[DownloadTask]:
+        """Get all tasks (queued and active)."""
+        with self.lock:
+            # Get active downloads
+            tasks = list(self.active_downloads.values())
+            # Get queued tasks
+            with self.queue.mutex:
+                tasks.extend([task for _, task in self.queue.queue])
+            return tasks
+    
+    def _process_queue(self) -> None:
+        """Process the download queue."""
+        while True:
+            try:
+                # Check if we can start new downloads
+                with self.lock:
+                    if len(self.active_downloads) >= self.max_concurrent:
+                        time.sleep(1)
+                        continue
+                
+                # Get next task
+                _, task = self.queue.get(block=True)
+                
+                # Skip if paused
+                if task.paused:
+                    self.queue.put((-task.priority, task))
+                    time.sleep(1)
+                    continue
+                
+                # Add to active downloads
+                with self.lock:
+                    self.active_downloads[task.id] = task
+                
+                # Start download thread
+                thread = threading.Thread(
+                    target=self._download_worker,
+                    args=(task,)
+                )
+                thread.daemon = True
+                thread.start()
+                
+            except Exception as e:
+                logger.error(f"Error in queue processor: {e}")
+                time.sleep(1)
+    
+    def _download_worker(self, task: DownloadTask) -> None:
+        """Handle individual download."""
+        try:
+            # Apply speed limit
+            speed_limit = self.global_speed_limit
+            if task.speed_limit is not None:
+                speed_limit = min(speed_limit, task.speed_limit) if speed_limit else task.speed_limit
+            
+            # Start download with speed limit
+            process_download(task.url, task.user, task.id, speed_limit)
+            
+        except Exception as e:
+            logger.error(f"Error in download worker: {e}")
+            task.status = "failed"
+            task.error = str(e)
+        finally:
+            # Remove from active downloads
+            with self.lock:
+                self.active_downloads.pop(task.id, None)
+
+# Initialize download queue
+download_queue = DownloadQueue(max_concurrent=2)
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
@@ -120,7 +258,7 @@ def is_spotify_url(url):
     parsed = urlparse(url)
     return parsed.netloc in ['open.spotify.com', 'spotify.com']
 
-def process_spotify_download(url, user_dir, safe_title=None):
+def process_spotify_download(url, user_dir, safe_title=None, speed_limit=None):
     """Download a Spotify track using spotdl."""
     # First try with FLAC
     cmd = [
@@ -128,8 +266,16 @@ def process_spotify_download(url, user_dir, safe_title=None):
         "--output", user_dir,
         "--format", "flac",
         "--bitrate", "1411k",  # CD quality FLAC
-        url
+        "--save-file", os.path.join(user_dir, "spotdl.temp.txt"),  # Save metadata
+        "--threads", "1",  # Avoid race conditions
+        "--lyrics",  # Include lyrics if available
     ]
+    
+    # Add speed limit if specified (convert MB/s to bytes/s)
+    if speed_limit:
+        cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+    
+    cmd.append(url)
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     # If FLAC fails, try high quality MP3
@@ -140,24 +286,76 @@ def process_spotify_download(url, user_dir, safe_title=None):
             "--output", user_dir,
             "--format", "mp3",
             "--bitrate", "320k",  # Highest quality MP3
-            url
+            "--save-file", os.path.join(user_dir, "spotdl.temp.txt"),
+            "--threads", "1",
+            "--lyrics",
         ]
+        
+        # Add speed limit if specified
+        if speed_limit:
+            cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+        
+        cmd.append(url)
         result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    # Clean up temp file
+    temp_file = os.path.join(user_dir, "spotdl.temp.txt")
+    if os.path.exists(temp_file):
+        try:
+            os.remove(temp_file)
+        except OSError:
+            pass
     
     return result
 
-def process_youtube_download(url, user_dir, safe_title):
+def process_youtube_download(url, user_dir, safe_title, speed_limit=None):
     """Download a YouTube video and convert to FLAC."""
     output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
     
     # First try with FLAC
-    cmd = ["yt-dlp", "-x", "--audio-format", "flac", "--audio-quality", "0", "-o", output_tmpl, url]
+    cmd = [
+        "yt-dlp",
+        "-x",
+        "--audio-format", "flac",
+        "--audio-quality", "0",
+        "--embed-thumbnail",  # Add thumbnail as cover art
+        "--embed-metadata",   # Include metadata
+        "--parse-metadata", "%(title)s:%(meta_title)s",
+        "--parse-metadata", "%(uploader)s:%(meta_artist)s",
+        "--add-metadata",
+        "--progress",  # Show progress
+        "-o", output_tmpl,
+    ]
+    
+    # Add speed limit if specified (convert MB/s to bytes/s)
+    if speed_limit:
+        cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+    
+    cmd.append(url)
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     # If FLAC fails, try high quality MP3
     if result.returncode != 0:
         logger.warning(f"FLAC download failed for {url}, trying MP3 fallback")
-        cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", output_tmpl, url]
+        cmd = [
+            "yt-dlp",
+            "-x",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",
+            "--embed-thumbnail",
+            "--embed-metadata",
+            "--parse-metadata", "%(title)s:%(meta_title)s",
+            "--parse-metadata", "%(uploader)s:%(meta_artist)s",
+            "--add-metadata",
+            "--progress",
+            "-o", output_tmpl,
+        ]
+        
+        # Add speed limit if specified
+        if speed_limit:
+            cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+        
+        cmd.append(url)
         result = subprocess.run(cmd, capture_output=True, text=True)
     
     return result
@@ -178,7 +376,7 @@ def get_title(url):
             raise Exception(f"Failed to get title: {proc.stderr}")
         return proc.stdout.strip()
 
-def process_download(url, user, job_id):
+def process_download(url, user, job_id, speed_limit=None):
     """Process download in a separate thread."""
     try:
         user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
@@ -196,9 +394,9 @@ def process_download(url, user, job_id):
 
         # Download based on URL type
         if is_spotify_url(url):
-            proc_download = process_spotify_download(url, user_dir, safe_title)
+            proc_download = process_spotify_download(url, user_dir, safe_title, speed_limit)
         else:
-            proc_download = process_youtube_download(url, user_dir, safe_title)
+            proc_download = process_youtube_download(url, user_dir, safe_title, speed_limit)
 
         # Update job status
         if proc_download.returncode == 0:
@@ -342,34 +540,24 @@ def download():
     """Handle FLAC download requests."""
     url = request.form.get('url', '').strip()
     user = session['username']
+    priority = int(request.form.get('priority', 0))
 
     if not url:
         flash('Please provide a valid URL', 'error')
         return redirect(url_for('index'))
 
-    # Initialize tracking for user
-    status_data = load_status()
-    if user not in status_data:
-        status_data[user] = []
-
-    # Create job entry
-    job_id = str(uuid.uuid4())
-    job = {
-        "id": job_id,
-        "title": "Fetching title...",
-        "status": "in_progress",
-        "url": url,
-        "started_at": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
-    status_data[user].append(job)
-    save_status(status_data)
-
-    # Start download process in a separate thread
-    thread = threading.Thread(target=process_download, args=(url, user, job_id))
-    thread.daemon = True
-    thread.start()
-
-    flash('Download started! Check the status page for progress.', 'success')
+    # Create download task
+    task = DownloadTask(
+        id=str(uuid.uuid4()),
+        url=url,
+        user=user,
+        priority=priority
+    )
+    
+    # Add to queue
+    download_queue.add_task(task)
+    
+    flash('Download added to queue! Check the status page for progress.', 'success')
     return redirect(url_for('status'))
 
 @app.route('/status')
@@ -597,6 +785,174 @@ def admin_delete_user(username):
         flash('Failed to delete user', 'error')
 
     return redirect(url_for('admin_users'))
+
+@app.route('/admin/queue')
+def admin_queue():
+    """Admin queue management page."""
+    if not is_admin(session.get('username')):
+        return redirect(url_for('index'))
+    
+    # Get all tasks
+    all_tasks = download_queue.get_all_tasks()
+    
+    # Split into active and queued
+    active_downloads = []
+    queued_downloads = []
+    for task in all_tasks:
+        if task.id in download_queue.active_downloads:
+            active_downloads.append(task)
+        else:
+            queued_downloads.append(task)
+    
+    return render_template('admin_queue.html',
+                         active_downloads=active_downloads,
+                         queued_downloads=queued_downloads,
+                         global_speed_limit=download_queue.global_speed_limit)
+
+@app.route('/admin/queue/speed_limit', methods=['POST'])
+def admin_set_speed_limit():
+    """Set global download speed limit."""
+    if not is_admin(session.get('username')):
+        return jsonify({'success': False, 'message': 'Not authorized'}), 403
+    
+    try:
+        speed_limit = float(request.form.get('speed_limit', 0))
+        if speed_limit <= 0:
+            speed_limit = None
+        download_queue.set_global_speed_limit(speed_limit)
+        flash('Speed limit updated successfully', 'success')
+    except ValueError:
+        flash('Invalid speed limit value', 'error')
+    
+    return redirect(url_for('admin_queue'))
+
+@app.route('/admin/queue/pause/<task_id>', methods=['POST'])
+def admin_pause_task(task_id):
+    """Pause a download task."""
+    if not is_admin(session.get('username')):
+        return jsonify({'success': False, 'message': 'Not authorized'}), 403
+    
+    if download_queue.pause_task(task_id):
+        flash('Task paused successfully', 'success')
+    else:
+        flash('Failed to pause task', 'error')
+    
+    return redirect(url_for('admin_queue'))
+
+@app.route('/admin/queue/resume/<task_id>', methods=['POST'])
+def admin_resume_task(task_id):
+    """Resume a paused download task."""
+    if not is_admin(session.get('username')):
+        return jsonify({'success': False, 'message': 'Not authorized'}), 403
+    
+    if download_queue.resume_task(task_id):
+        flash('Task resumed successfully', 'success')
+    else:
+        flash('Failed to resume task', 'error')
+    
+    return redirect(url_for('admin_queue'))
+
+@app.route('/admin/queue/priority/<task_id>', methods=['POST'])
+def admin_set_priority(task_id):
+    """Set priority for a queued download task."""
+    if not is_admin(session.get('username')):
+        return jsonify({'success': False, 'message': 'Not authorized'}), 403
+    
+    try:
+        priority = int(request.form.get('priority', 0))
+        # Find task and update priority
+        all_tasks = download_queue.get_all_tasks()
+        for task in all_tasks:
+            if task.id == task_id:
+                task.priority = priority
+                flash('Priority updated successfully', 'success')
+                break
+        else:
+            flash('Task not found', 'error')
+    except ValueError:
+        flash('Invalid priority value', 'error')
+    
+    return redirect(url_for('admin_queue'))
+
+@app.route('/preview')
+def preview():
+    """Get preview information for a URL."""
+    url = request.args.get('url', '').strip()
+    if not url:
+        return jsonify({'success': False, 'message': 'No URL provided'})
+
+    try:
+        if is_spotify_url(url):
+            # Get Spotify track info
+            cmd = ["spotdl", "--print-url", url]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                return jsonify({'success': False, 'message': 'Failed to get track info'})
+            
+            # Parse spotdl output
+            lines = proc.stdout.strip().split('\n')
+            title = lines[0]
+            artist = lines[1] if len(lines) > 1 else "Unknown Artist"
+            
+            return jsonify({
+                'success': True,
+                'title': title,
+                'artist': artist,
+                'thumbnail': lines[2] if len(lines) > 2 else '',
+                'duration': lines[3] if len(lines) > 3 else ''
+            })
+        else:
+            # Get YouTube video info
+            cmd = [
+                "yt-dlp",
+                "--print", "%(title)s",
+                "--print", "%(uploader)s",
+                "--print", "%(thumbnail)s",
+                "--print", "%(duration_string)s",
+                url
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                return jsonify({'success': False, 'message': 'Failed to get video info'})
+            
+            # Parse yt-dlp output
+            lines = proc.stdout.strip().split('\n')
+            return jsonify({
+                'success': True,
+                'title': lines[0],
+                'artist': lines[1],
+                'thumbnail': lines[2],
+                'duration': lines[3]
+            })
+            
+    except Exception as e:
+        logger.error(f"Preview error: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/batch_download', methods=['POST'])
+def batch_download():
+    """Handle batch download requests."""
+    urls = request.form.get('urls', '').strip().split('\n')
+    urls = [url.strip() for url in urls if url.strip()]
+    base_priority = int(request.form.get('priority', 0))
+    user = session['username']
+
+    if not urls:
+        flash('Please provide at least one valid URL', 'error')
+        return redirect(url_for('index'))
+
+    # Add each URL to the queue with incrementing priority
+    for i, url in enumerate(urls):
+        task = DownloadTask(
+            id=str(uuid.uuid4()),
+            url=url,
+            user=user,
+            priority=base_priority + i  # Increment priority for each URL
+        )
+        download_queue.add_task(task)
+
+    flash(f'Added {len(urls)} downloads to queue! Check the status page for progress.', 'success')
+    return redirect(url_for('status'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 

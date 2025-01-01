@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Download Queue Management</h2>
+    
+    <!-- Global Speed Limit -->
+    <div class="card bg-dark text-light mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Global Speed Limit</h5>
+            <form action="{{ url_for('admin_set_speed_limit') }}" method="post" class="form-inline">
+                <div class="input-group">
+                    <input type="number" step="0.1" min="0" name="speed_limit" 
+                           class="form-control" placeholder="Speed limit in MB/s"
+                           value="{{ global_speed_limit or '' }}">
+                    <div class="input-group-append">
+                        <span class="input-group-text">MB/s</span>
+                        <button type="submit" class="btn btn-primary">Set Limit</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Active Downloads -->
+    <div class="card bg-dark text-light mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Active Downloads ({{ active_downloads|length }})</h5>
+        </div>
+        <div class="card-body">
+            {% for task in active_downloads %}
+            <div class="download-item mb-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6>{{ task.title or task.url }}</h6>
+                        <small class="text-muted">User: {{ task.user }}</small>
+                    </div>
+                    <div class="btn-group">
+                        {% if task.paused %}
+                        <form action="{{ url_for('admin_resume_task', task_id=task.id) }}" method="post" style="display: inline;">
+                            <button type="submit" class="btn btn-success btn-sm">Resume</button>
+                        </form>
+                        {% else %}
+                        <form action="{{ url_for('admin_pause_task', task_id=task.id) }}" method="post" style="display: inline;">
+                            <button type="submit" class="btn btn-warning btn-sm">Pause</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="progress mt-2" style="height: 20px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated"
+                         role="progressbar"
+                         style="width: {{ task.progress }}%"
+                         aria-valuenow="{{ task.progress }}"
+                         aria-valuemin="0"
+                         aria-valuemax="100">{{ task.progress }}%</div>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-muted">No active downloads</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Queued Downloads -->
+    <div class="card bg-dark text-light">
+        <div class="card-header">
+            <h5 class="mb-0">Download Queue ({{ queued_downloads|length }})</h5>
+        </div>
+        <div class="card-body">
+            {% for task in queued_downloads %}
+            <div class="download-item mb-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6>{{ task.title or task.url }}</h6>
+                        <small class="text-muted">User: {{ task.user }} | Priority: {{ task.priority }}</small>
+                    </div>
+                    <div class="btn-group">
+                        <form action="{{ url_for('admin_set_priority', task_id=task.id) }}" method="post" class="form-inline">
+                            <div class="input-group input-group-sm">
+                                <input type="number" name="priority" class="form-control" 
+                                       value="{{ task.priority }}" style="width: 70px;">
+                                <div class="input-group-append">
+                                    <button type="submit" class="btn btn-primary btn-sm">Set Priority</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-muted">No queued downloads</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<style>
+.download-item {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 1rem;
+    border-radius: 0.25rem;
+}
+.progress {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.input-group-text {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: none;
+}
+</style>
+{% endblock %} 

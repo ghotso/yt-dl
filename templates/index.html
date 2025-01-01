@@ -1,60 +1,195 @@
 {% extends "base.html" %}
 
-{% block title %}Home{% endblock %}
-
 {% block content %}
-<div class="form-container">
-    <div class="card shadow-sm">
-        <div class="card-body">
-            <h2 class="card-title text-center mb-4">Download FLAC Audio</h2>
-            <form method="POST" action="{{ url_for('download') }}">
-                <div class="mb-3">
-                    <label for="url" class="form-label">URL</label>
-                    <input type="url" class="form-control" id="url" name="url" 
-                           placeholder="https://www.youtube.com/watch?v=... or https://open.spotify.com/track/..." required autofocus>
-                    <div class="form-text">Enter a YouTube video or Spotify track URL to download its audio in FLAC format.</div>
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card bg-dark text-light">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" data-toggle="tab" href="#single" role="tab">🎵 Single URL</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-toggle="tab" href="#batch" role="tab">📑 Batch Upload</a>
+                        </li>
+                    </ul>
                 </div>
-                <div class="d-grid">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-download me-2"></i>Download
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div class="card shadow-sm mt-4">
-        <div class="card-body">
-            <h5 class="card-title">Supported Services</h5>
-            <div class="row g-3 mb-3">
-                <div class="col-6">
-                    <div class="d-flex align-items-center">
-                        <i class="bi bi-youtube text-danger me-2" style="font-size: 1.5rem;"></i>
-                        <div>
-                            <strong>YouTube</strong><br>
-                            <small class="text-muted">Video URLs</small>
+                <div class="card-body">
+                    <div class="tab-content">
+                        <!-- Single URL Tab -->
+                        <div class="tab-pane fade show active" id="single" role="tabpanel">
+                            <form action="{{ url_for('download') }}" method="post" class="mb-4">
+                                <div class="form-group">
+                                    <label for="url">🔗 YouTube or Spotify URL</label>
+                                    <input type="url" class="form-control" id="url" name="url" required
+                                           placeholder="https://www.youtube.com/watch?v=... or https://open.spotify.com/track/...">
+                                </div>
+                                <div class="form-group">
+                                    <label for="priority">⭐ Priority (0-10)</label>
+                                    <input type="number" class="form-control" id="priority" name="priority"
+                                           min="0" max="10" value="0">
+                                </div>
+                                <button type="button" class="btn btn-info mb-3" onclick="previewTrack()">
+                                    👁️ Preview
+                                </button>
+                                <button type="submit" class="btn btn-primary mb-3">
+                                    ⬇️ Download
+                                </button>
+                            </form>
+                            <!-- Preview Area -->
+                            <div id="preview-area" class="d-none">
+                                <div class="card bg-darker text-light">
+                                    <div class="card-body">
+                                        <h5 class="card-title">🎵 Track Preview</h5>
+                                        <div id="preview-content">
+                                            <div class="d-flex align-items-center">
+                                                <img id="preview-thumbnail" class="mr-3" style="max-width: 120px;">
+                                                <div>
+                                                    <h6 id="preview-title"></h6>
+                                                    <p id="preview-artist" class="mb-1"></p>
+                                                    <p id="preview-duration" class="mb-0"></p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
-                <div class="col-6">
-                    <div class="d-flex align-items-center">
-                        <i class="bi bi-spotify text-success me-2" style="font-size: 1.5rem;"></i>
-                        <div>
-                            <strong>Spotify</strong><br>
-                            <small class="text-muted">Track URLs</small>
+
+                        <!-- Batch Upload Tab -->
+                        <div class="tab-pane fade" id="batch" role="tabpanel">
+                            <form action="{{ url_for('batch_download') }}" method="post">
+                                <div class="form-group">
+                                    <label for="urls">📝 URLs (one per line)</label>
+                                    <textarea class="form-control" id="urls" name="urls" rows="6" required
+                                              placeholder="https://www.youtube.com/watch?v=...&#10;https://open.spotify.com/track/..."></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="batch-priority">⭐ Base Priority (0-10)</label>
+                                    <input type="number" class="form-control" id="batch-priority" name="priority"
+                                           min="0" max="10" value="0">
+                                    <small class="form-text text-muted">Each URL will be queued with incrementing priority</small>
+                                </div>
+                                <button type="button" class="btn btn-info mb-3" onclick="previewBatch()">
+                                    👁️ Preview All
+                                </button>
+                                <button type="submit" class="btn btn-primary mb-3">
+                                    ⬇️ Download All
+                                </button>
+                            </form>
+                            <!-- Batch Preview Area -->
+                            <div id="batch-preview-area" class="d-none">
+                                <div class="card bg-darker text-light">
+                                    <div class="card-body">
+                                        <h5 class="card-title">📑 Batch Preview</h5>
+                                        <div id="batch-preview-content"></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <h5 class="card-title">Instructions</h5>
-            <ol class="mb-0">
-                <li>Paste a valid YouTube or Spotify URL in the input field above</li>
-                <li>Click the Download button to start the conversion</li>
-                <li>Monitor the download progress on the <a href="{{ url_for('status') }}">Status page</a></li>
-                <li>Once completed, your FLAC file will be available in your personal downloads folder</li>
-            </ol>
         </div>
     </div>
 </div>
+
+<style>
+.bg-darker {
+    background: rgba(0, 0, 0, 0.2);
+}
+.form-control {
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+.form-control:focus {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+}
+.form-control::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+.nav-tabs .nav-link {
+    color: rgba(255, 255, 255, 0.7);
+}
+.nav-tabs .nav-link.active {
+    background-color: #343a40;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+</style>
+
+<script>
+async function previewTrack() {
+    const url = document.getElementById('url').value;
+    if (!url) return;
+
+    const preview = document.getElementById('preview-area');
+    preview.classList.remove('d-none');
+    
+    try {
+        const response = await fetch(`/preview?url=${encodeURIComponent(url)}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('preview-thumbnail').src = data.thumbnail;
+            document.getElementById('preview-title').textContent = data.title;
+            document.getElementById('preview-artist').textContent = data.artist;
+            document.getElementById('preview-duration').textContent = data.duration;
+        } else {
+            document.getElementById('preview-content').innerHTML = 
+                `<div class="alert alert-warning">⚠️ ${data.message}</div>`;
+        }
+    } catch (error) {
+        document.getElementById('preview-content').innerHTML = 
+            '<div class="alert alert-danger">❌ Failed to load preview</div>';
+    }
+}
+
+async function previewBatch() {
+    const urls = document.getElementById('urls').value.split('\n').filter(url => url.trim());
+    if (!urls.length) return;
+
+    const preview = document.getElementById('batch-preview-area');
+    preview.classList.remove('d-none');
+    const content = document.getElementById('batch-preview-content');
+    content.innerHTML = '<div class="text-center"><div class="spinner-border"></div></div>';
+
+    try {
+        const previews = await Promise.all(urls.map(async url => {
+            try {
+                const response = await fetch(`/preview?url=${encodeURIComponent(url.trim())}`);
+                const data = await response.json();
+                return data.success ? data : { success: false, url, message: data.message };
+            } catch {
+                return { success: false, url, message: 'Failed to load preview' };
+            }
+        }));
+
+        content.innerHTML = previews.map((data, index) => `
+            <div class="mb-3 p-2 rounded ${data.success ? 'bg-success bg-opacity-25' : 'bg-danger bg-opacity-25'}">
+                <div class="d-flex align-items-center">
+                    ${data.success ? `
+                        <img src="${data.thumbnail}" class="mr-3" style="max-width: 60px;">
+                        <div>
+                            <h6 class="mb-1">${data.title}</h6>
+                            <small>${data.artist}</small>
+                        </div>
+                    ` : `
+                        <div class="w-100">
+                            <h6 class="mb-1">${data.url}</h6>
+                            <small class="text-warning">⚠️ ${data.message}</small>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        content.innerHTML = '<div class="alert alert-danger">❌ Failed to load previews</div>';
+    }
+}
+</script>
 {% endblock %} 
