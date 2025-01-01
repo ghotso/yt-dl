@@ -3,24 +3,78 @@
 {% block title %}Login{% endblock %}
 
 {% block content %}
-<div class="form-container">
-    <div class="card shadow-sm">
-        <div class="card-body">
-            <h2 class="card-title text-center mb-4">Login</h2>
-            <form method="POST" action="{{ url_for('login') }}">
-                <div class="mb-3">
-                    <label for="username" class="form-label">Username</label>
-                    <input type="text" class="form-control" id="username" name="username" required autofocus>
-                </div>
-                <div class="mb-3">
-                    <label for="password" class="form-label">Password</label>
-                    <input type="password" class="form-control" id="password" name="password" required>
-                </div>
-                <div class="d-grid">
-                    <button type="submit" class="btn btn-primary">Login</button>
-                </div>
-            </form>
+<div class="form-container d-flex align-items-center justify-content-center" style="min-height: calc(100vh - 6rem);">
+    <div class="w-100">
+        <div class="text-center mb-4">
+            <i class="bi bi-music-note-beamed" style="font-size: 3rem; color: var(--primary-color);"></i>
+            <h1 class="mt-3 mb-3">Welcome Back</h1>
+            <p class="text-muted">Login to start downloading your favorite music in FLAC format</p>
+        </div>
+        
+        <div class="card glass-effect">
+            <div class="card-body p-4">
+                <form method="POST" action="{{ url_for('login') }}" class="needs-validation" novalidate>
+                    <div class="mb-4">
+                        <div class="input-group">
+                            <span class="input-group-text bg-transparent border-end-0">
+                                <i class="bi bi-person text-muted"></i>
+                            </span>
+                            <input type="text" 
+                                   class="form-control border-start-0" 
+                                   id="username" 
+                                   name="username" 
+                                   placeholder="Username"
+                                   required 
+                                   autofocus>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <div class="input-group">
+                            <span class="input-group-text bg-transparent border-end-0">
+                                <i class="bi bi-lock text-muted"></i>
+                            </span>
+                            <input type="password" 
+                                   class="form-control border-start-0" 
+                                   id="password" 
+                                   name="password" 
+                                   placeholder="Password"
+                                   required>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-box-arrow-in-right me-2"></i>Login
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="text-center mt-4">
+            <p class="text-muted small">
+                <i class="bi bi-shield-lock me-1"></i>
+                Default credentials: admin / admin
+            </p>
         </div>
     </div>
 </div>
+
+<script>
+// Form validation
+(function () {
+    'use strict'
+    var forms = document.querySelectorAll('.needs-validation')
+    Array.prototype.slice.call(forms).forEach(function (form) {
+        form.addEventListener('submit', function (event) {
+            if (!form.checkValidity()) {
+                event.preventDefault()
+                event.stopPropagation()
+            }
+            form.classList.add('was-validated')
+        }, false)
+    })
+})()
+</script>
 {% endblock %} 

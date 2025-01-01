@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card glass-effect">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center mb-4">
+                        <i class="bi bi-person-circle" style="font-size: 3rem; color: var(--primary-color);"></i>
+                        <div class="ms-3">
+                            <h2 class="mb-1">{{ user.username }}</h2>
+                            <span class="badge bg-{{ 'primary' if is_admin else 'secondary' }}">
+                                {{ 'Administrator' if is_admin else 'User' }}
+                            </span>
+                            {% if is_admin %}
+                            <a href="{{ url_for('admin_users') }}" class="btn btn-outline-primary btn-sm ms-2">
+                                <i class="bi bi-people me-1"></i>Manage Users
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-4">
+                            <div class="card bg-transparent border">
+                                <div class="card-body">
+                                    <h4 class="mb-3">Update Username</h4>
+                                    <form method="POST" action="{{ url_for('update_user_username') }}" class="needs-validation" novalidate>
+                                        <div class="mb-3">
+                                            <label for="new_username" class="form-label">New Username</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-transparent border-end-0">
+                                                    <i class="bi bi-person text-muted"></i>
+                                                </span>
+                                                <input type="text" 
+                                                       class="form-control border-start-0" 
+                                                       id="new_username" 
+                                                       name="new_username" 
+                                                       value="{{ user.username }}"
+                                                       required>
+                                            </div>
+                                        </div>
+                                        <div class="d-grid">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="bi bi-check-circle me-2"></i>Update Username
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6 mb-4">
+                            <div class="card bg-transparent border">
+                                <div class="card-body">
+                                    <h4 class="mb-3">Change Password</h4>
+                                    <form method="POST" action="{{ url_for('change_password') }}" class="needs-validation" novalidate>
+                                        <div class="mb-3">
+                                            <label for="current_password" class="form-label">Current Password</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-transparent border-end-0">
+                                                    <i class="bi bi-lock text-muted"></i>
+                                                </span>
+                                                <input type="password" 
+                                                       class="form-control border-start-0" 
+                                                       id="current_password" 
+                                                       name="current_password" 
+                                                       required>
+                                            </div>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="new_password" class="form-label">New Password</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-transparent border-end-0">
+                                                    <i class="bi bi-key text-muted"></i>
+                                                </span>
+                                                <input type="password" 
+                                                       class="form-control border-start-0" 
+                                                       id="new_password" 
+                                                       name="new_password" 
+                                                       required>
+                                            </div>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="confirm_password" class="form-label">Confirm New Password</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-transparent border-end-0">
+                                                    <i class="bi bi-key-fill text-muted"></i>
+                                                </span>
+                                                <input type="password" 
+                                                       class="form-control border-start-0" 
+                                                       id="confirm_password" 
+                                                       name="confirm_password" 
+                                                       required>
+                                            </div>
+                                        </div>
+
+                                        <div class="d-grid">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="bi bi-check-circle me-2"></i>Update Password
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {% if is_admin %}
+                    <div class="mt-2">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>Admin Note:</strong> You can also update the admin password via command line:
+                            <pre class="mt-2 mb-0"><code>curl -X POST http://localhost:5000/admin/update_admin \
+    -H "Content-Type: application/json" \
+    -d '{"password": "new_password"}'</code></pre>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Form validation
+(function () {
+    'use strict'
+    var forms = document.querySelectorAll('.needs-validation')
+    Array.prototype.slice.call(forms).forEach(function (form) {
+        form.addEventListener('submit', function (event) {
+            if (!form.checkValidity()) {
+                event.preventDefault()
+                event.stopPropagation()
+            }
+            form.classList.add('was-validated')
+        }, false)
+    })
+})()
+</script>
+{% endblock %} 

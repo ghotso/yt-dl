@@ -9,10 +9,10 @@
             <h2 class="card-title text-center mb-4">Download FLAC Audio</h2>
             <form method="POST" action="{{ url_for('download') }}">
                 <div class="mb-3">
-                    <label for="url" class="form-label">YouTube URL</label>
+                    <label for="url" class="form-label">URL</label>
                     <input type="url" class="form-control" id="url" name="url" 
-                           placeholder="https://www.youtube.com/watch?v=..." required autofocus>
-                    <div class="form-text">Enter a YouTube video URL to download its audio in FLAC format.</div>
+                           placeholder="https://www.youtube.com/watch?v=... or https://open.spotify.com/track/..." required autofocus>
+                    <div class="form-text">Enter a YouTube video or Spotify track URL to download its audio in FLAC format.</div>
                 </div>
                 <div class="d-grid">
                     <button type="submit" class="btn btn-primary">
@@ -25,9 +25,31 @@
 
     <div class="card shadow-sm mt-4">
         <div class="card-body">
+            <h5 class="card-title">Supported Services</h5>
+            <div class="row g-3 mb-3">
+                <div class="col-6">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-youtube text-danger me-2" style="font-size: 1.5rem;"></i>
+                        <div>
+                            <strong>YouTube</strong><br>
+                            <small class="text-muted">Video URLs</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-spotify text-success me-2" style="font-size: 1.5rem;"></i>
+                        <div>
+                            <strong>Spotify</strong><br>
+                            <small class="text-muted">Track URLs</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <h5 class="card-title">Instructions</h5>
             <ol class="mb-0">
-                <li>Paste a valid YouTube video URL in the input field above</li>
+                <li>Paste a valid YouTube or Spotify URL in the input field above</li>
                 <li>Click the Download button to start the conversion</li>
                 <li>Monitor the download progress on the <a href="{{ url_for('status') }}">Status page</a></li>
                 <li>Once completed, your FLAC file will be available in your personal downloads folder</li>
