@@ -122,19 +122,45 @@ def is_spotify_url(url):
 
 def process_spotify_download(url, user_dir, safe_title=None):
     """Download a Spotify track using spotdl."""
+    # First try with FLAC
     cmd = [
         "spotdl",
         "--output", user_dir,
         "--format", "flac",
+        "--bitrate", "1411k",  # CD quality FLAC
         url
     ]
-    return subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    # If FLAC fails, try high quality MP3
+    if result.returncode != 0:
+        logger.warning(f"FLAC download failed for {url}, trying MP3 fallback")
+        cmd = [
+            "spotdl",
+            "--output", user_dir,
+            "--format", "mp3",
+            "--bitrate", "320k",  # Highest quality MP3
+            url
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    return result
 
 def process_youtube_download(url, user_dir, safe_title):
     """Download a YouTube video and convert to FLAC."""
     output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
-    cmd = ["yt-dlp", "-x", "--audio-format", "flac", "-o", output_tmpl, url]
-    return subprocess.run(cmd, capture_output=True, text=True)
+    
+    # First try with FLAC
+    cmd = ["yt-dlp", "-x", "--audio-format", "flac", "--audio-quality", "0", "-o", output_tmpl, url]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    # If FLAC fails, try high quality MP3
+    if result.returncode != 0:
+        logger.warning(f"FLAC download failed for {url}, trying MP3 fallback")
+        cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", output_tmpl, url]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    return result
 
 def get_title(url):
     """Get the title of the track/video."""
@@ -201,11 +227,31 @@ def process_download(url, user, job_id):
 def load_users():
     """Load users from JSON file."""
     try:
-        with open(app.config['USERS_FILE'], 'r') as f:
-            return json.load(f)
+        os.makedirs(os.path.dirname(app.config['USERS_FILE']), exist_ok=True)
+        if os.path.exists(app.config['USERS_FILE']):
+            with open(app.config['USERS_FILE'], 'r') as f:
+                return json.load(f)
+        
+        # Create default admin user if file doesn't exist
+        default_users = {
+            "users": [{
+                "username": "admin",
+                "password_hash": hash_password("admin")
+            }]
+        }
+        with open(app.config['USERS_FILE'], 'w') as f:
+            json.dump(default_users, f, indent=4)
+        return default_users
+        
     except Exception as e:
         logger.error(f"Error loading users: {e}")
-        return {"users": []}
+        # Return default admin user even if file operations fail
+        return {
+            "users": [{
+                "username": "admin",
+                "password_hash": hash_password("admin")
+            }]
+        }
 
 def save_users(users_data):
     """Save users to JSON file."""
@@ -251,8 +297,6 @@ def is_admin(username):
     """Check if user is admin."""
     return username == 'admin'
 
-USERS = load_users()
-
 @app.before_request
 def check_auth():
     """Check if user is authenticated for protected routes."""
@@ -271,9 +315,12 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        stored_hash = USERS.get(username)
+        
+        # Get user from users list
+        users_data = load_users()
+        user = next((u for u in users_data['users'] if u['username'] == username), None)
 
-        if stored_hash and verify_password(password, stored_hash):
+        if user and verify_password(password, user['password_hash']):
             session['logged_in'] = True
             session['username'] = username
             logger.info(f"Successful login for user: {username}")
@@ -400,26 +447,55 @@ def update_username(old_username, new_username):
     # Check if new username already exists
     if any(u["username"] == new_username for u in users_data["users"]):
         return False
-        
-    for user in users_data["users"]:
-        if user["username"] == old_username:
-            user["username"] = new_username
-            if save_users(users_data):
-                # Update status data with new username
+    
+    # Store original state for rollback
+    original_users = json.loads(json.dumps(users_data))
+    original_status = load_status()
+    
+    try:
+        # 1. Update username in users.json
+        for user in users_data["users"]:
+            if user["username"] == old_username:
+                user["username"] = new_username
+                if not save_users(users_data):
+                    raise Exception("Failed to save user data")
+                
+                # 2. Update status data
                 status_data = load_status()
                 if old_username in status_data:
                     status_data[new_username] = status_data.pop(old_username)
-                    save_status(status_data)
-                # Update downloads directory
+                    if not save_status(status_data):
+                        raise Exception("Failed to save status data")
+                
+                # 3. Update downloads directory
                 old_dir = os.path.join(app.config['DOWNLOAD_DIR'], old_username)
                 new_dir = os.path.join(app.config['DOWNLOAD_DIR'], new_username)
                 if os.path.exists(old_dir):
                     os.makedirs(os.path.dirname(new_dir), exist_ok=True)
                     try:
                         os.rename(old_dir, new_dir)
-                    except OSError:
-                        logger.error(f"Failed to rename directory from {old_dir} to {new_dir}")
+                    except OSError as e:
+                        raise Exception(f"Failed to rename downloads directory: {str(e)}")
+                
                 return True
+                
+    except Exception as e:
+        # Rollback on any error
+        logger.error(f"Username update failed, rolling back: {str(e)}")
+        save_users(original_users)
+        save_status(original_status)
+        
+        # Try to restore directory if it was renamed
+        new_dir = os.path.join(app.config['DOWNLOAD_DIR'], new_username)
+        old_dir = os.path.join(app.config['DOWNLOAD_DIR'], old_username)
+        if os.path.exists(new_dir) and not os.path.exists(old_dir):
+            try:
+                os.rename(new_dir, old_dir)
+            except OSError:
+                logger.error(f"Failed to rollback directory rename from {new_dir} to {old_dir}")
+        
+        raise Exception(f"Failed to update username: {str(e)}")
+        
     return False
 
 def create_user(username, password):
@@ -469,11 +545,14 @@ def update_user_username():
         flash('Username is required', 'error')
         return redirect(url_for('profile'))
 
-    if update_username(session['username'], new_username):
-        session['username'] = new_username
-        flash('Username updated successfully', 'success')
-    else:
-        flash('Failed to update username. It might already be taken.', 'error')
+    try:
+        if update_username(session['username'], new_username):
+            session['username'] = new_username
+            flash('Username updated successfully', 'success')
+        else:
+            flash('Failed to update username. It might already be taken.', 'error')
+    except Exception as e:
+        flash(f'Error updating username: {str(e)}', 'error')
 
     return redirect(url_for('profile'))
 
