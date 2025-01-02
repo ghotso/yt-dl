@@ -10,7 +10,7 @@ import time
 import queue
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl
 from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -266,7 +266,47 @@ downloads_status = load_status()
 def is_spotify_url(url):
     """Check if the URL is a Spotify URL."""
     parsed = urlparse(url)
-    return parsed.netloc in ['open.spotify.com', 'spotify.com']
+    # Handle all Spotify URL formats including international ones
+    return (
+        parsed.netloc.endswith('spotify.com') and
+        any(x in parsed.path for x in ['/track/', '/album/', '/playlist/', '/artist/'])
+    )
+
+def clean_spotify_url(url):
+    """Clean Spotify URL by removing unnecessary parameters and locale identifiers."""
+    parsed = urlparse(url)
+    # Remove intl-xx from path and query parameters except ID
+    path_parts = [p for p in parsed.path.split('/') if p and not p.startswith('intl-')]
+    clean_path = '/' + '/'.join(path_parts)
+    
+    # Keep only the essential query parameter (typically 'si')
+    query = ''
+    if parsed.query:
+        query_params = dict(parse_qsl(parsed.query))
+        if 'si' in query_params:
+            query = f"?si={query_params['si']}"
+    
+    return f"https://open.spotify.com{clean_path}{query}"
+
+def is_youtube_url(url):
+    """Check if the URL is a YouTube URL."""
+    parsed = urlparse(url)
+    return (
+        parsed.netloc in [
+            'youtube.com',
+            'www.youtube.com',
+            'youtu.be',
+            'm.youtube.com',
+            'music.youtube.com'
+        ]
+    )
+
+def clean_youtube_url(url):
+    """Clean YouTube URL to standard format."""
+    if 'youtu.be/' in url:
+        video_id = url.split('youtu.be/')[-1].split('?')[0]
+        return f"https://www.youtube.com/watch?v={video_id}"
+    return url
 
 def get_format_fallbacks(preferred_format: str) -> List[str]:
     """Get list of formats to try in order of preference."""
@@ -279,81 +319,107 @@ def get_format_fallbacks(preferred_format: str) -> List[str]:
 
 def process_spotify_download(url, user_dir, safe_title=None, speed_limit=None):
     """Download a Spotify track."""
-    # Get user's preferred format
-    users_data = load_users()
-    user = next((u for u in users_data['users'] if u['username'] == session['username']), None)
-    preferred_format = user.get('default_format', 'flac')
-    
-    # Get format fallbacks
-    formats_to_try = get_format_fallbacks(preferred_format)
-    
-    for audio_format in formats_to_try:
-        cmd = [
-            "spotdl",
-            url,
-            "--format", audio_format,
-            "--output", user_dir,
-            "--print-errors",
-            "--lyrics",
-            "--threads", "1"
-        ]
+    try:
+        # Clean the Spotify URL
+        clean_url = clean_spotify_url(url)
         
-        # Add speed limit if specified
-        if speed_limit:
-            cmd.extend(["--yt-dlp-args", f"--limit-rate {int(speed_limit * 1024 * 1024)}"])
+        # Get user's preferred format
+        users_data = load_users()
+        user = next((u for u in users_data['users'] if u['username'] == session['username']), None)
+        preferred_format = user.get('default_format', 'flac')
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Get format fallbacks
+        formats_to_try = get_format_fallbacks(preferred_format)
         
-        if result.returncode == 0:
-            logger.info(f"Successfully downloaded in {audio_format} format")
-            break
-        else:
-            logger.warning(f"Failed to download in {audio_format} format, trying next format: {result.stderr}")
-    
-    return result
+        last_error = None
+        for audio_format in formats_to_try:
+            cmd = [
+                "spotdl",
+                clean_url,
+                "--format", audio_format,
+                "--output", user_dir,
+                "--print-errors",
+                "--lyrics",
+                "--threads", "1"
+            ]
+            
+            # Add speed limit if specified
+            if speed_limit:
+                cmd.extend(["--yt-dlp-args", f"--limit-rate {int(speed_limit * 1024 * 1024)}"])
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                logger.info(f"Successfully downloaded in {audio_format} format")
+                return result
+            else:
+                last_error = result.stderr
+                logger.warning(f"Failed to download in {audio_format} format: {last_error}")
+        
+        # If all formats failed, raise the last error
+        if last_error:
+            raise Exception(f"All formats failed. Last error: {last_error}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in Spotify download: {str(e)}")
+        raise
 
 def process_youtube_download(url, user_dir, safe_title, speed_limit=None):
     """Download a YouTube video and convert to audio."""
-    output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
-    
-    # Get user's preferred format
-    users_data = load_users()
-    user = next((u for u in users_data['users'] if u['username'] == session['username']), None)
-    preferred_format = user.get('default_format', 'flac')
-    
-    # Get format fallbacks
-    formats_to_try = get_format_fallbacks(preferred_format)
-    
-    for audio_format in formats_to_try:
-        cmd = [
-            "yt-dlp",
-            "-x",
-            "--audio-format", audio_format,
-            "--audio-quality", "0",
-            "--embed-thumbnail",  # Add thumbnail as cover art
-            "--embed-metadata",   # Include metadata
-            "--parse-metadata", "%(title)s:%(meta_title)s",
-            "--parse-metadata", "%(uploader)s:%(meta_artist)s",
-            "--add-metadata",
-            "--progress",  # Show progress
-            "-o", output_tmpl,
-        ]
+    try:
+        # Clean the YouTube URL
+        clean_url = clean_youtube_url(url)
+        output_tmpl = os.path.join(user_dir, f"{safe_title} [%(id)s].%(ext)s")
         
-        # Add speed limit if specified
-        if speed_limit:
-            cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+        # Get user's preferred format
+        users_data = load_users()
+        user = next((u for u in users_data['users'] if u['username'] == session['username']), None)
+        preferred_format = user.get('default_format', 'flac')
         
-        cmd.append(url)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Get format fallbacks
+        formats_to_try = get_format_fallbacks(preferred_format)
         
-        if result.returncode == 0:
-            logger.info(f"Successfully downloaded in {audio_format} format")
-            return result
-        else:
-            logger.warning(f"Failed to download in {audio_format} format, trying next format")
-    
-    # If all formats failed
-    return result  # Return the last failed result
+        last_error = None
+        for audio_format in formats_to_try:
+            cmd = [
+                "yt-dlp",
+                "-x",
+                "--audio-format", audio_format,
+                "--audio-quality", "0",
+                "--embed-thumbnail",  # Add thumbnail as cover art
+                "--embed-metadata",   # Include metadata
+                "--parse-metadata", "%(title)s:%(meta_title)s",
+                "--parse-metadata", "%(uploader)s:%(meta_artist)s",
+                "--add-metadata",
+                "--progress",  # Show progress
+                "-o", output_tmpl,
+            ]
+            
+            # Add speed limit if specified
+            if speed_limit:
+                cmd.extend(["--limit-rate", f"{int(speed_limit * 1024 * 1024)}"])
+            
+            cmd.append(clean_url)
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                logger.info(f"Successfully downloaded in {audio_format} format")
+                return result
+            else:
+                last_error = result.stderr
+                logger.warning(f"Failed to download in {audio_format} format: {last_error}")
+        
+        # If all formats failed, raise the last error
+        if last_error:
+            raise Exception(f"All formats failed. Last error: {last_error}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in YouTube download: {str(e)}")
+        raise
 
 def get_title(url):
     """Get the title of the track/video."""
@@ -406,27 +472,39 @@ def process_download(url, user, job_id, speed_limit=None):
                 "status": "in_progress"
             })
 
-            # Download based on URL type
-            if is_spotify_url(url):
-                proc_download = process_spotify_download(url, user_dir, safe_title, speed_limit)
-            else:
-                proc_download = process_youtube_download(url, user_dir, safe_title, speed_limit)
+            try:
+                # Download based on URL type
+                if is_spotify_url(url):
+                    proc_download = process_spotify_download(url, user_dir, safe_title, speed_limit)
+                elif is_youtube_url(url):
+                    proc_download = process_youtube_download(url, user_dir, safe_title, speed_limit)
+                else:
+                    raise Exception("Unsupported URL format")
 
-            # Update job status
-            if proc_download.returncode == 0:
-                update_job_status(user, job_id, {
-                    "status": "completed",
-                    "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
-                logger.info(f"Download completed: user={user}, title={safe_title}")
-            else:
-                error_msg = proc_download.stderr or "Unknown error occurred"
+                # Update job status
+                if proc_download.returncode == 0:
+                    update_job_status(user, job_id, {
+                        "status": "completed",
+                        "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    logger.info(f"Download completed: user={user}, title={safe_title}")
+                else:
+                    error_msg = proc_download.stderr or "Unknown error occurred"
+                    update_job_status(user, job_id, {
+                        "status": "failed",
+                        "error": error_msg,
+                        "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    logger.error(f"Download failed: user={user}, error={error_msg}")
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Download process error: user={user}, error={error_msg}")
                 update_job_status(user, job_id, {
                     "status": "failed",
                     "error": error_msg,
                     "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 })
-                logger.error(f"Download failed: user={user}, error={error_msg}")
 
     except Exception as e:
         error_msg = str(e)
