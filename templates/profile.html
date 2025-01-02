@@ -73,6 +73,62 @@
                 </div>
             </div>
 
+            <!-- Plex Library Settings -->
+            <div class="card bg-dark text-light mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">🎵 Plex Library Settings</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('update_plex_library') }}" method="post" class="mb-4">
+                        <div class="form-group">
+                            <label for="plex_library">Plex Music Library Name</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="plex_library" name="plex_library"
+                                       value="{{ user.plex_library or 'Music' }}" required>
+                                <button type="button" class="btn btn-info" onclick="checkPlexLibrary()">
+                                    🔍 Check Library
+                                </button>
+                            </div>
+                            <small class="form-text text-muted">Enter the name of your Plex music library</small>
+                            <div id="library-check-result" class="mt-2"></div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">💾 Save Library Preference</button>
+                    </form>
+                </div>
+            </div>
+
+            <script>
+            async function checkPlexLibrary() {
+                const libraryName = document.getElementById('plex_library').value;
+                const resultDiv = document.getElementById('library-check-result');
+                
+                if (!libraryName) {
+                    resultDiv.innerHTML = '<div class="alert alert-warning">Please enter a library name</div>';
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('{{ url_for("check_plex_library") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `library_name=${encodeURIComponent(libraryName)}`
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        resultDiv.innerHTML = `<div class="alert alert-success">✅ ${data.message}</div>`;
+                    } else {
+                        resultDiv.innerHTML = `<div class="alert alert-danger">❌ ${data.message}</div>`;
+                    }
+                } catch (error) {
+                    resultDiv.innerHTML = '<div class="alert alert-danger">❌ Failed to check library</div>';
+                }
+            }
+            </script>
+
             {% if is_admin %}
             <!-- Admin Links -->
             <div class="mt-4">

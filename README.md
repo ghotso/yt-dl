@@ -20,6 +20,7 @@ This application is built upon and depends on these amazing open source projects
 
 - [**spotDL**](https://github.com/spotDL/spotify-downloader) - Download Spotify songs with metadata
 - [**yt-dlp**](https://github.com/yt-dlp/yt-dlp) - Download YouTube videos and extract audio
+- [**PlexAPI**](https://github.com/pkkid/python-plexapi) - Python bindings for the Plex API
 
 We are grateful to the maintainers and contributors of these projects for making high-quality audio downloading possible.
 
@@ -43,6 +44,12 @@ We are grateful to the maintainers and contributors of these projects for making
 - 👤 Profile management
 - 🛡️ Admin controls
 
+### 🎨 Plex Integration
+- 🎧 Add downloads directly to Plex playlists
+- 📚 User-specific music library settings
+- 🔄 Automatic library scanning
+- ✅ Library validation
+
 ### 🎨 Modern UI
 - 🌙 Dark mode interface
 - 📱 Mobile-friendly design
@@ -56,19 +63,36 @@ We are grateful to the maintainers and contributors of these projects for making
 mkdir -p data downloads
 ```
 
-2. Run with Docker:
+2. Create a `.env` file:
+```bash
+cp .env.example .env
+```
+
+3. Configure your environment:
+```env
+# Flask Configuration
+SECRET_KEY=your-secret-key-here
+DOWNLOAD_DIR=downloads
+
+# Plex Configuration (optional)
+PLEX_URL=http://your-plex-server:32400
+PLEX_TOKEN=your-plex-token-here
+```
+
+4. Run with Docker:
 ```bash
 docker pull ghcr.io/ghotso/ytdl-spotdl-manager:latest
 
 docker run -p 5000:5000 \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/downloads:/app/downloads \
+  --env-file .env \
   ghcr.io/ghotso/ytdl-spotdl-manager:latest
 ```
 
-3. Access at `http://localhost:5000`
+5. Access at `http://localhost:5000`
 
-4. Login with default credentials:
+6. Login with default credentials:
 - 👤 Username: `admin`
 - 🔑 Password: `admin`
 
@@ -79,6 +103,8 @@ docker run -p 5000:5000 \
 |----------|-------------|---------|
 | `SECRET_KEY` | Flask session key | `your-secret-key-here` |
 | `DOWNLOAD_DIR` | Download location | `downloads` |
+| `PLEX_URL` | Plex server URL | `None` |
+| `PLEX_TOKEN` | Plex authentication token | `None` |
 
 ### 📁 Directory Structure
 ```
@@ -98,6 +124,25 @@ docker run -p 5000:5000 \
 - 📁 User isolation
 - 🛡️ XSS protection
 - 🔒 Safe file paths
+
+## 🤝 Plex Integration
+
+1. Get your Plex token:
+   - Sign in to Plex
+   - View your account page
+   - Copy the `X-Plex-Token` from any of the URLs
+
+2. Configure Plex in `.env`:
+   ```env
+   PLEX_URL=http://your-plex-server:32400
+   PLEX_TOKEN=your-plex-token
+   ```
+
+3. Each user can:
+   - Set their preferred music library
+   - Choose playlists for downloads
+   - Validate library settings
+   - Auto-add songs to playlists
 
 ## 🤝 Contributing
 
@@ -120,6 +165,11 @@ We love your input! Check out our:
 - ✅ Default credentials: admin/admin
 - 🔑 Change password immediately after first login
 - 📝 Check logs for authentication errors
+
+### Plex integration not working
+- ✅ Verify your Plex token is correct
+- 🔍 Check if the music library name matches exactly
+- 📝 Ensure Plex server is accessible from the container
 
 ## 📜 License
 

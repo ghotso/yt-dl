@@ -19,22 +19,38 @@
                     <div class="tab-content">
                         <!-- Single URL Tab -->
                         <div class="tab-pane fade show active" id="single" role="tabpanel">
-                            <form action="{{ url_for('download') }}" method="post">
-                                <div class="form-group mb-4">
-                                    <label for="url">🔗 YouTube or Spotify URL</label>
-                                    <input type="url" class="form-control" id="url" name="url" required
+                            <form action="{{ url_for('download') }}" method="post" class="space-y-4">
+                                <div>
+                                    <label for="url" class="block text-sm font-medium">🔗 YouTube or Spotify URL</label>
+                                    <input type="text" id="url" name="url" required
+                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                            placeholder="https://www.youtube.com/watch?v=... or https://open.spotify.com/track/...">
                                 </div>
-                                <div class="form-group mb-4">
-                                    <label for="priority">⭐ Priority (0-10)</label>
-                                    <input type="number" class="form-control" id="priority" name="priority"
-                                           min="0" max="10" value="0">
+
+                                <div>
+                                    <label for="priority" class="block text-sm font-medium">⭐ Priority (0-10)</label>
+                                    <input type="number" id="priority" name="priority" min="0" max="10" value="0"
+                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
                                 </div>
-                                <div class="d-flex gap-2 mb-4">
-                                    <button type="button" class="btn btn-info" onclick="previewTrack()">
+
+                                {% if playlists %}
+                                <div>
+                                    <label for="plex_playlist" class="block text-sm font-medium">🎵 Add to Plex Playlist</label>
+                                    <select id="plex_playlist" name="plex_playlist"
+                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                        <option value="">Don't add to playlist</option>
+                                        {% for playlist in playlists %}
+                                        <option value="{{ playlist.id }}">{{ playlist.title }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                {% endif %}
+
+                                <div class="flex space-x-4">
+                                    <button type="button" onclick="previewTrack()" class="flex-1 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700">
                                         👁️ Preview
                                     </button>
-                                    <button type="submit" class="btn btn-primary">
+                                    <button type="submit" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
                                         ⬇️ Download
                                     </button>
                                 </div>

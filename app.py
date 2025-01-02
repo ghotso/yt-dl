@@ -13,6 +13,8 @@ from typing import Optional, Dict, List, Tuple
 from urllib.parse import urlparse, parse_qsl
 from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
+from plexapi.server import PlexServer
+from plexapi.exceptions import NotFound
 
 # Configure logging
 logging.basicConfig(
@@ -20,6 +22,89 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Plex configuration
+PLEX_URL = os.environ.get('PLEX_URL')
+PLEX_TOKEN = os.environ.get('PLEX_TOKEN')
+
+def get_plex_server():
+    """Get Plex server instance."""
+    if not PLEX_URL or not PLEX_TOKEN:
+        return None
+    try:
+        return PlexServer(PLEX_URL, PLEX_TOKEN)
+    except Exception as e:
+        logger.error(f"Failed to connect to Plex server: {e}")
+        return None
+
+def get_plex_playlists():
+    """Get all music playlists from Plex."""
+    try:
+        plex = get_plex_server()
+        if not plex:
+            return []
+        
+        # Get music library using current user's preference
+        library_name = get_user_plex_library(session['username'])
+        try:
+            music = plex.library.section(library_name)
+        except NotFound:
+            logger.error(f"Music library '{library_name}' not found")
+            return []
+        
+        # Get audio playlists
+        playlists = [
+            {"id": playlist.ratingKey, "title": playlist.title}
+            for playlist in plex.playlists()
+            if playlist.playlistType == "audio"
+        ]
+        return playlists
+    except Exception as e:
+        logger.error(f"Error getting Plex playlists: {e}")
+        return []
+
+def add_to_plex_playlist(playlist_id, file_path, username):
+    """Add a downloaded song to a Plex playlist."""
+    try:
+        plex = get_plex_server()
+        if not plex:
+            return False
+        
+        # Get the playlist
+        try:
+            playlist = plex.playlist(playlist_id)
+        except NotFound:
+            logger.error(f"Playlist {playlist_id} not found")
+            return False
+        
+        # Get music library using user's preference
+        library_name = get_user_plex_library(username)
+        try:
+            music = plex.library.section(library_name)
+        except NotFound:
+            logger.error(f"Music library '{library_name}' not found")
+            return False
+        
+        # Force a library scan to detect the new file
+        music.update()
+        time.sleep(2)  # Give Plex time to process
+        
+        # Search for the track
+        filename = os.path.basename(file_path)
+        tracks = music.searchTracks(filename)
+        
+        if tracks:
+            # Add the first matching track to the playlist
+            playlist.addItems(tracks[0])
+            logger.info(f"Added {filename} to playlist {playlist.title}")
+            return True
+        else:
+            logger.error(f"Track not found in Plex library: {filename}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error adding to Plex playlist: {e}")
+        return False
 
 AUDIO_FORMATS: List[Tuple[str, str]] = [
     ("flac", "FLAC (Lossless)"),
@@ -44,6 +129,7 @@ class DownloadTask:
     title: Optional[str] = None
     status: str = "queued"
     error: Optional[str] = None
+    plex_playlist_id: Optional[str] = None  # New field for Plex playlist
 
 class DownloadQueue:
     """Manages download queue and concurrent downloads."""
@@ -424,22 +510,25 @@ def process_youtube_download(url, user_dir, safe_title, speed_limit=None):
 def get_title(url):
     """Get the title of the track/video."""
     if is_spotify_url(url):
-        cmd = ["spotdl", "--print-errors", "--format", "json", url]
+        cmd = ["spotdl", url, "--print-errors"]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise Exception(f"Failed to get Spotify track info: {proc.stderr}")
-        try:
-            # Try to parse JSON output
-            data = json.loads(proc.stdout.strip())
-            if isinstance(data, list) and len(data) > 0:
-                track = data[0]
-                return f"{track.get('artist', 'Unknown')} - {track.get('name', 'Unknown')}"
-        except json.JSONDecodeError:
-            # Fallback to old parsing method
-            for line in proc.stdout.strip().split('\n'):
-                if 'Title:' in line:
-                    return line.split('Title:', 1)[1].strip()
-            raise Exception("Could not find title in Spotify track info")
+        
+        # Parse output for title and artist
+        title = None
+        artist = None
+        for line in proc.stdout.strip().split('\n'):
+            if 'Title:' in line:
+                title = line.split('Title:', 1)[1].strip()
+            elif 'Artist:' in line:
+                artist = line.split('Artist:', 1)[1].strip()
+        
+        if title and artist:
+            return f"{artist} - {title}"
+        elif title:
+            return title
+        raise Exception("Could not find title in Spotify track info")
     else:
         cmd = ["yt-dlp", "--print", "%(title)s", url]
         proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -449,73 +538,89 @@ def get_title(url):
 
 def process_download(url, user, job_id, speed_limit=None):
     """Process download in a separate thread."""
-    try:
-        # Create application context
+    def _update_status(status_data):
+        """Helper to update status with proper app context."""
         with app.app_context():
-            user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
-            os.makedirs(user_dir, exist_ok=True)
+            update_job_status(user, job_id, status_data)
 
-            # Get title and update initial status
-            try:
-                raw_title = get_title(url)
-                safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
-            except Exception as e:
-                logger.error(f"Failed to get title: {str(e)}")
-                safe_title = "Unknown Title"
-                raw_title = "Unknown Title"
+    try:
+        user_dir = os.path.join(app.config['DOWNLOAD_DIR'], user)
+        os.makedirs(user_dir, exist_ok=True)
 
-            # Always create an initial status entry
-            update_job_status(user, job_id, {
-                "title": raw_title,
-                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "url": url,
-                "status": "in_progress"
-            })
+        # Get title and update initial status
+        try:
+            raw_title = get_title(url)
+            safe_title = re.sub(r'[^A-Za-z0-9_\-\s]+', '_', raw_title)
+        except Exception as e:
+            logger.error(f"Failed to get title: {str(e)}")
+            safe_title = "Unknown Title"
+            raw_title = "Unknown Title"
 
-            try:
-                # Download based on URL type
-                if is_spotify_url(url):
-                    proc_download = process_spotify_download(url, user_dir, safe_title, speed_limit)
-                elif is_youtube_url(url):
-                    proc_download = process_youtube_download(url, user_dir, safe_title, speed_limit)
-                else:
-                    raise Exception("Unsupported URL format")
+        # Get task from queue to access playlist ID
+        task = next((t for t in download_queue.get_all_tasks() if t.id == job_id), None)
+        plex_playlist_id = task.plex_playlist_id if task else None
 
-                # Update job status
-                if proc_download.returncode == 0:
-                    update_job_status(user, job_id, {
-                        "status": "completed",
-                        "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    logger.info(f"Download completed: user={user}, title={safe_title}")
-                else:
-                    error_msg = proc_download.stderr or "Unknown error occurred"
-                    update_job_status(user, job_id, {
-                        "status": "failed",
-                        "error": error_msg,
-                        "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    logger.error(f"Download failed: user={user}, error={error_msg}")
+        # Create initial status entry
+        _update_status({
+            "title": raw_title,
+            "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "url": url,
+            "status": "in_progress"
+        })
 
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Download process error: user={user}, error={error_msg}")
-                update_job_status(user, job_id, {
+        try:
+            # Download based on URL type
+            if is_spotify_url(url):
+                proc_download = process_spotify_download(url, user_dir, safe_title, speed_limit)
+            elif is_youtube_url(url):
+                proc_download = process_youtube_download(url, user_dir, safe_title, speed_limit)
+            else:
+                raise Exception("Unsupported URL format")
+
+            # Update job status
+            if proc_download.returncode == 0:
+                # Try to add to Plex playlist if specified
+                if plex_playlist_id:
+                    # Find the downloaded file
+                    downloaded_files = [f for f in os.listdir(user_dir) if safe_title in f]
+                    if downloaded_files:
+                        file_path = os.path.join(user_dir, downloaded_files[0])
+                        if add_to_plex_playlist(plex_playlist_id, file_path, user):
+                            logger.info(f"Added {safe_title} to Plex playlist")
+                        else:
+                            logger.warning(f"Failed to add {safe_title} to Plex playlist")
+
+                _update_status({
+                    "status": "completed",
+                    "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+                logger.info(f"Download completed: user={user}, title={safe_title}")
+            else:
+                error_msg = proc_download.stderr or "Unknown error occurred"
+                _update_status({
                     "status": "failed",
                     "error": error_msg,
                     "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 })
+                logger.error(f"Download failed: user={user}, error={error_msg}")
 
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Download failed: user={user}, error={error_msg}")
-        # Create application context for error status update
-        with app.app_context():
-            update_job_status(user, job_id, {
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Download process error: user={user}, error={error_msg}")
+            _update_status({
                 "status": "failed",
                 "error": error_msg,
                 "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
             })
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Download failed: user={user}, error={error_msg}")
+        _update_status({
+            "status": "failed",
+            "error": error_msg,
+            "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        })
 
 def load_users():
     """Load users from JSON file."""
@@ -606,7 +711,8 @@ def check_auth():
 @app.route('/')
 def index():
     """Home page with download form."""
-    return render_template('index.html')
+    playlists = get_plex_playlists() if PLEX_URL and PLEX_TOKEN else []
+    return render_template('index.html', playlists=playlists)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -642,6 +748,7 @@ def download():
     url = request.form.get('url', '').strip()
     user = session['username']
     priority = int(request.form.get('priority', 0))
+    plex_playlist_id = request.form.get('plex_playlist')
 
     if not url:
         flash('Please provide a valid URL', 'error')
@@ -652,7 +759,8 @@ def download():
         id=str(uuid.uuid4()),
         url=url,
         user=user,
-        priority=priority
+        priority=priority,
+        plex_playlist_id=plex_playlist_id
     )
     
     # Add to queue
@@ -1106,6 +1214,61 @@ def update_format_preference():
             break
 
     return redirect(url_for('profile'))
+
+@app.route('/profile/check_plex_library', methods=['POST'])
+def check_plex_library():
+    """Check if a Plex library exists."""
+    if 'username' not in session:
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+    
+    library_name = request.form.get('library_name')
+    if not library_name:
+        return jsonify({'success': False, 'message': 'Library name is required'})
+    
+    try:
+        plex = get_plex_server()
+        if not plex:
+            return jsonify({'success': False, 'message': 'Plex server not configured'})
+        
+        # Try to get the library
+        try:
+            plex.library.section(library_name)
+            return jsonify({'success': True, 'message': f'Library "{library_name}" found'})
+        except NotFound:
+            return jsonify({'success': False, 'message': f'Library "{library_name}" not found'})
+            
+    except Exception as e:
+        logger.error(f"Error checking Plex library: {e}")
+        return jsonify({'success': False, 'message': 'Failed to check library'})
+
+@app.route('/profile/update_plex_library', methods=['POST'])
+def update_plex_library():
+    """Update user's Plex library preference."""
+    if 'username' not in session:
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+    
+    library_name = request.form.get('plex_library')
+    if not library_name:
+        return jsonify({'success': False, 'message': 'Library name is required'})
+    
+    # Update user's library preference
+    users_data = load_users()
+    for user in users_data['users']:
+        if user['username'] == session['username']:
+            user['plex_library'] = library_name
+            if save_users(users_data):
+                flash('Plex library preference updated successfully', 'success')
+            else:
+                flash('Failed to update Plex library preference', 'error')
+            break
+    
+    return redirect(url_for('profile'))
+
+def get_user_plex_library(username):
+    """Get user's preferred Plex library name."""
+    users_data = load_users()
+    user = next((u for u in users_data['users'] if u['username'] == username), None)
+    return user.get('plex_library', 'Music') if user else 'Music'  # Default to 'Music' if not set
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 
